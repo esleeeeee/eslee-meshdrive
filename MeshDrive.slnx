@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MeshDrive.Agent/MeshDrive.Agent.csproj" />
+    <Project Path="src/MeshDrive.Core/MeshDrive.Core.csproj" />
+    <Project Path="src/MeshDrive.Protocol/MeshDrive.Protocol.csproj" />
+    <Project Path="src/MeshDrive.Windows/MeshDrive.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MeshDrive.Tests/MeshDrive.Tests.csproj" />
+  </Folder>
+</Solution>

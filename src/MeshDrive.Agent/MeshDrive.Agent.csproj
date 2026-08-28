@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>MeshDrive.Agent</RootNamespace>
+    <AssemblyName>MeshDrive.Agent</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MeshDrive.Core\MeshDrive.Core.csproj" />
+    <ProjectReference Include="..\MeshDrive.Protocol\MeshDrive.Protocol.csproj" />
+  </ItemGroup>
+</Project>
