@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography.X509Certificates;
 using MeshDrive.Agent;
 using MeshDrive.Core;
 
@@ -8,6 +9,37 @@ namespace MeshDrive.Tests;
 [TestClass]
 public sealed class PairingHttpsTests
 {
+    [TestMethod]
+    public async Task IncomingOfferCannotExtendSessionBeyondDefaultLifetime()
+    {
+        await using var sender = await TestHttpsNode.StartAsync("PC-A");
+        await using var receiver = await TestHttpsNode.StartAsync("PC-B");
+        var offer = new PairingOfferDto
+        {
+            ProtocolVersion = 1,
+            SessionId = Guid.NewGuid().ToString("N"),
+            DeviceId = sender.Identity.DeviceId,
+            DeviceName = sender.Identity.DeviceName,
+            Fingerprint = sender.Credential.Fingerprint,
+            CertificateDer = Convert.ToBase64String(
+                sender.Credential.Certificate.Export(X509ContentType.Cert)),
+            Nonce = PairingNonce.Create(),
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(1),
+            ListenPort = sender.Port,
+        };
+
+        var reply = receiver.Coordinator.AcceptOffer(
+            offer,
+            sender.Credential.Certificate,
+            IPAddress.Loopback.ToString());
+        var snapshot = receiver.Coordinator.CurrentPairing();
+        var observedAt = DateTimeOffset.UtcNow;
+
+        Assert.IsNotNull(snapshot);
+        Assert.AreEqual(reply.ExpiresAt, snapshot.ExpiresAt);
+        Assert.IsTrue(snapshot.ExpiresAt <= observedAt.Add(PairingSession.DefaultLifetime));
+    }
+
     [TestMethod]
     public async Task TwoHostsPairWithMatchingSasThenTrustHttpsAndRejectUnpaired()
     {

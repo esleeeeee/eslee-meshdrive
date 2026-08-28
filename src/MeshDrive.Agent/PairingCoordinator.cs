@@ -267,7 +267,11 @@ public sealed class PairingCoordinator
             throw new InvalidOperationException("페어링 요청이 만료되었습니다.");
         }
 
-        var reply = CreateLocalOffer(offer.SessionId, PairingNonce.Create(), offer.ExpiresAt);
+        var localExpiresAt = now.Add(PairingSession.DefaultLifetime);
+        var expiresAt = DateTimeOffset.Compare(offer.ExpiresAt, localExpiresAt) <= 0
+                ? offer.ExpiresAt
+                : localExpiresAt;
+        var reply = CreateLocalOffer(offer.SessionId, PairingNonce.Create(), expiresAt);
         var session = new PairingSession(
             offer.SessionId,
             PairingTranscript.Create(
@@ -276,7 +280,7 @@ public sealed class PairingCoordinator
             offer.DeviceId,
             offer.DeviceName,
             offer.Fingerprint,
-            offer.ExpiresAt);
+            expiresAt);
         lock (_gate)
         {
             if (_session is not null && _session.StatusAt(now) == PairingStatus.Waiting)
