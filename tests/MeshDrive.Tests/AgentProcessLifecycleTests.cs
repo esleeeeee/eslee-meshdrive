@@ -23,7 +23,7 @@ public sealed class AgentProcessLifecycleTests
             client = await AgentIpcClient.ConnectOrStartAsync(
                 pipeName,
                 agentPath,
-                ["--pipe-name", pipeName, "--mutex-name", mutexName, "--disable-mdns"],
+                ["--pipe-name", pipeName, "--mutex-name", mutexName, "--disable-mdns", "--disable-https"],
                 TestTimeout,
                 CancellationToken.None);
             var first = await client.GetStatusAsync(CancellationToken.None);
@@ -74,7 +74,7 @@ public sealed class AgentProcessLifecycleTests
         var pipeName = "mdt-once-" + Guid.NewGuid().ToString("N");
         var mutexName = @"Local\mdt-once-" + Guid.NewGuid().ToString("N");
         var agentPath = AgentProcessLauncher.ResolveExecutablePath();
-        var arguments = new[] { "--pipe-name", pipeName, "--mutex-name", mutexName, "--disable-mdns" };
+        var arguments = new[] { "--pipe-name", pipeName, "--mutex-name", mutexName, "--disable-mdns", "--disable-https" };
 
         Process? first = null;
         Process? second = null;

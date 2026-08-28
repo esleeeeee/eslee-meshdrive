@@ -2,7 +2,13 @@ using MeshDrive.Core;
 
 namespace MeshDrive.Agent;
 
-public sealed record AgentHostOptions(string PipeName, string MutexName, string DataDirectory, bool EnableMdns);
+public sealed record AgentHostOptions(
+    string PipeName,
+    string MutexName,
+    string DataDirectory,
+    bool EnableMdns,
+    bool EnableHttps,
+    int HttpsPort);
 
 public static class AgentArguments
 {
@@ -13,6 +19,8 @@ public static class AgentArguments
         string? mutexName = null;
         string? dataDirectory = null;
         var enableMdns = true;
+        var enableHttps = true;
+        int? httpsPort = null;
         for (var index = 0; index < args.Count; index++)
         {
             var argument = args[index];
@@ -55,6 +63,31 @@ public static class AgentArguments
                 continue;
             }
 
+            if (argument is "--disable-https")
+            {
+                enableHttps = false;
+                continue;
+            }
+
+            if (argument is "--https-port")
+            {
+                if (!TryReadValue(args, ref index, "--https-port", out var portText, out error))
+                {
+                    options = null!;
+                    return false;
+                }
+
+                if (!int.TryParse(portText, out var parsed) || parsed is <= 0 or > 65535)
+                {
+                    options = null!;
+                    error = "--https-port 값이 올바르지 않습니다.";
+                    return false;
+                }
+
+                httpsPort = parsed;
+                continue;
+            }
+
             options = null!;
             error = $"알 수 없는 인수입니다: {argument}";
             return false;
@@ -64,7 +97,9 @@ public static class AgentArguments
             string.IsNullOrWhiteSpace(pipeName) ? IpcNames.DefaultPipeName : pipeName,
             string.IsNullOrWhiteSpace(mutexName) ? IpcNames.DefaultMutexName : mutexName,
             string.IsNullOrWhiteSpace(dataDirectory) ? AppPaths.DefaultDataDirectory : dataDirectory,
-            enableMdns);
+            enableMdns,
+            enableHttps,
+            httpsPort ?? DiscoveryNames.DefaultPort);
         error = string.Empty;
         return true;
     }

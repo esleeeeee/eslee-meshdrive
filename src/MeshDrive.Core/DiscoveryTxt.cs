@@ -69,22 +69,59 @@ public static class DiscoveryTxt
     public static bool TrySelectIpv4(IEnumerable<IPAddress> addresses, IPAddress? fallback, out string ipv4)
     {
         ArgumentNullException.ThrowIfNull(addresses);
-        foreach (var address in addresses)
+        if (TrySelectConnectionAddresses(fallback, addresses, out var primary, out _))
         {
-            if (IsUsableIpv4(address))
-            {
-                ipv4 = address.ToString();
-                return true;
-            }
-        }
-
-        if (fallback is not null && IsUsableIpv4(fallback))
-        {
-            ipv4 = fallback.ToString();
+            ipv4 = primary;
             return true;
         }
 
         ipv4 = string.Empty;
+        return false;
+    }
+
+    /// <summary>
+    /// mDNS 패킷을 실제로 보낸 상대 IPv4를 연결 주소로 우선하고,
+    /// 광고된 다른 IPv4는 fallback으로 둔다.
+    /// </summary>
+    public static bool TrySelectConnectionAddresses(
+        IPAddress? packetSource,
+        IEnumerable<IPAddress> advertised,
+        out string primary,
+        out IReadOnlyList<string> fallbacks)
+    {
+        ArgumentNullException.ThrowIfNull(advertised);
+        var advertisedUsable = new List<string>();
+        foreach (var address in advertised)
+        {
+            if (IsUsableIpv4(address))
+            {
+                var text = address.ToString();
+                if (!advertisedUsable.Contains(text, StringComparer.Ordinal))
+                {
+                    advertisedUsable.Add(text);
+                }
+            }
+        }
+
+        if (packetSource is not null && IsUsableIpv4(packetSource))
+        {
+            var sourceText = packetSource.ToString();
+            primary = sourceText;
+            fallbacks = advertisedUsable
+                .Where(address => !string.Equals(address, sourceText, StringComparison.Ordinal))
+                .ToArray();
+            return true;
+        }
+
+        if (advertisedUsable.Count > 0)
+        {
+            primary = advertisedUsable[0];
+            fallbacks = advertisedUsable.Skip(1).ToArray();
+            return true;
+        }
+
+        primary = string.Empty;
+        fallbacks = [];
         return false;
     }
 

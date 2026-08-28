@@ -14,32 +14,61 @@ public static class AgentRuntime
         }
 
         MdnsDiscoveryHost? mdns = null;
+        AgentHttpsHost? https = null;
         try
         {
             var identity = DeviceIdentityStore.LoadOrCreate(options.DataDirectory);
+            var credential = DeviceCredentialStore.LoadOrCreate(options.DataDirectory, identity.DeviceId);
+            var trust = new TrustedPeerStore(options.DataDirectory);
             var directory = new PeerDirectory(identity.DeviceId, DiscoveryNames.OfflineAfter);
+            var coordinator = new PairingCoordinator(
+                identity,
+                credential,
+                trust,
+                directory,
+                options.HttpsPort);
             var discovery = DiscoveryNames.DiscoveryOff;
+            await using var server = new AgentIpcServer(
+                options.PipeName,
+                DateTimeOffset.Now,
+                deviceId: identity.DeviceId,
+                deviceName: identity.DeviceName,
+                discovery: DiscoveryNames.DiscoveryOff,
+                listPeers: coordinator.ListPeers,
+                handleCommand: coordinator.HandleIpcAsync,
+                discoveryProvider: () => discovery);
+            var ipc = server.RunAsync(cancellationToken);
+            if (options.EnableHttps)
+            {
+                https = new AgentHttpsHost(identity, credential, coordinator, options.HttpsPort);
+                try
+                {
+                    await https.TryStartAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                }
+            }
+
             if (options.EnableMdns)
             {
-                mdns = new MdnsDiscoveryHost(identity, directory);
+                mdns = new MdnsDiscoveryHost(identity, directory, options.HttpsPort);
                 if (mdns.TryStart())
                 {
                     discovery = DiscoveryNames.DiscoveryMdns;
                 }
             }
 
-            await using var server = new AgentIpcServer(
-                options.PipeName,
-                DateTimeOffset.Now,
-                deviceId: identity.DeviceId,
-                deviceName: identity.DeviceName,
-                discovery: discovery,
-                listPeers: directory.Snapshot);
-            await server.RunAsync(cancellationToken).ConfigureAwait(false);
+            await ipc.ConfigureAwait(false);
             return 0;
         }
         finally
         {
+            if (https is not null)
+            {
+                await https.DisposeAsync().ConfigureAwait(false);
+            }
+
             mdns?.Dispose();
             if (ownsMutex && mutex is not null)
             {

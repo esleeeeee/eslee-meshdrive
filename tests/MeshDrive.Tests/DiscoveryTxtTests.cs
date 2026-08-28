@@ -39,11 +39,20 @@ public sealed class DiscoveryTxtTests
         Assert.IsFalse(DiscoveryTxt.IsUsableIpv4(IPAddress.Parse("169.254.10.4")));
         Assert.IsFalse(DiscoveryTxt.IsUsableIpv4(IPAddress.IPv6Loopback));
 
+        Assert.IsTrue(DiscoveryTxt.TrySelectConnectionAddresses(
+            IPAddress.Parse("10.0.0.8"),
+            [IPAddress.Parse("192.168.0.5"), IPAddress.Parse("10.0.0.8")],
+            out var primary,
+            out var fallbacks));
+        Assert.AreEqual("10.0.0.8", primary);
+        Assert.HasCount(1, fallbacks);
+        Assert.AreEqual("192.168.0.5", fallbacks[0]);
+
         Assert.IsTrue(DiscoveryTxt.TrySelectIpv4(
             [IPAddress.IPv6Loopback, IPAddress.Parse("192.168.0.5")],
             fallback: IPAddress.Parse("10.0.0.1"),
             out var ipv4));
-        Assert.AreEqual("192.168.0.5", ipv4);
+        Assert.AreEqual("10.0.0.1", ipv4);
 
         Assert.IsTrue(DiscoveryTxt.TrySelectIpv4(
             [IPAddress.Loopback],

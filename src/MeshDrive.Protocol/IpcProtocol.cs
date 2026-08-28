@@ -18,6 +18,16 @@ public static class IpcProtocol
     public const string TypeShutdownAck = "shutdown-ack";
     public const string TypeGetPeers = "get-peers";
     public const string TypePeers = "peers";
+    public const string TypeStartPairing = "start-pairing";
+    public const string TypeDecidePairing = "decide-pairing";
+    public const string TypeGetPairing = "get-pairing";
+    public const string TypePairing = "pairing";
+    public const string TypeGetTrusted = "get-trusted";
+    public const string TypeTrusted = "trusted";
+    public const string TypeUnpair = "unpair";
+    public const string TypeUnpairAck = "unpair-ack";
+    public const string TypeSecurePing = "secure-ping";
+    public const string TypePingResult = "ping-result";
     public const string TypeError = "error";
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
@@ -106,7 +116,9 @@ public static class IpcProtocol
                 payload.Ipv4 ?? string.Empty,
                 payload.Port ?? DiscoveryNames.DefaultPort,
                 payload.Online ?? false,
-                payload.LastSeen ?? DateTimeOffset.MinValue));
+                payload.LastSeen ?? DateTimeOffset.MinValue,
+                payload.FallbackIpv4s,
+                string.IsNullOrWhiteSpace(payload.TrustState) ? TrustStates.Unpaired : payload.TrustState));
         }
 
         return peers;
@@ -126,6 +138,54 @@ public static class IpcProtocol
                 Port = peer.Port,
                 Online = peer.IsOnline,
                 LastSeen = peer.LastSeen,
+                TrustState = peer.TrustState,
+                FallbackIpv4s = peer.FallbackIpv4s?.ToList(),
+            });
+        }
+
+        return payloads;
+    }
+
+    public static IpcMessage FromPairing(PairingSnapshot? snapshot, int? id)
+    {
+        if (snapshot is null)
+        {
+            return new IpcMessage
+            {
+                Type = TypePairing,
+                ProtocolVersion = Version,
+                Id = id,
+            };
+        }
+
+        return new IpcMessage
+        {
+            Type = TypePairing,
+            ProtocolVersion = Version,
+            Id = id,
+            SessionId = snapshot.SessionId,
+            DeviceId = snapshot.PeerDeviceId,
+            DeviceName = snapshot.PeerName,
+            Fingerprint = snapshot.PeerFingerprint,
+            Sas = snapshot.Sas,
+            PairingStatus = snapshot.Status,
+            Accepted = snapshot.LocalAccepted,
+            ExpiresAt = snapshot.ExpiresAt,
+        };
+    }
+
+    public static List<IpcTrustedPeer> ToTrustedPayloads(IReadOnlyList<TrustedPeer> peers)
+    {
+        ArgumentNullException.ThrowIfNull(peers);
+        var payloads = new List<IpcTrustedPeer>(peers.Count);
+        foreach (var peer in peers)
+        {
+            payloads.Add(new IpcTrustedPeer
+            {
+                DeviceId = peer.DeviceId,
+                Name = peer.Name,
+                Fingerprint = peer.Fingerprint,
+                PairedAt = peer.PairedAt,
             });
         }
 

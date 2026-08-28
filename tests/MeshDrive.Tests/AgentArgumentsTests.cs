@@ -15,6 +15,8 @@ public sealed class AgentArgumentsTests
         Assert.AreEqual(IpcNames.DefaultMutexName, options.MutexName);
         Assert.AreEqual(AppPaths.DefaultDataDirectory, options.DataDirectory);
         Assert.IsTrue(options.EnableMdns);
+        Assert.IsTrue(options.EnableHttps);
+        Assert.AreEqual(DiscoveryNames.DefaultPort, options.HttpsPort);
     }
 
     [TestMethod]

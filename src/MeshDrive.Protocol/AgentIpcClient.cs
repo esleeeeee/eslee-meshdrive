@@ -103,6 +103,42 @@ public sealed class AgentIpcClient : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
+    public Task<IpcMessage> StartPairingAsync(string deviceId, string? ipv4, int? port, CancellationToken cancellationToken) =>
+        ExchangeMessageAsync(
+            new IpcMessage
+            {
+                Type = IpcProtocol.TypeStartPairing,
+                DeviceId = deviceId,
+                Ipv4 = ipv4,
+                Port = port,
+            },
+            IpcProtocol.TypePairing,
+            cancellationToken);
+
+    public Task<IpcMessage> GetPairingAsync(CancellationToken cancellationToken) =>
+        ExchangeAsync(IpcProtocol.TypeGetPairing, IpcProtocol.TypePairing, cancellationToken);
+
+    public Task<IpcMessage> DecidePairingAsync(bool accepted, CancellationToken cancellationToken) =>
+        ExchangeMessageAsync(
+            new IpcMessage { Type = IpcProtocol.TypeDecidePairing, Accepted = accepted },
+            IpcProtocol.TypePairing,
+            cancellationToken);
+
+    public Task<IpcMessage> GetTrustedAsync(CancellationToken cancellationToken) =>
+        ExchangeAsync(IpcProtocol.TypeGetTrusted, IpcProtocol.TypeTrusted, cancellationToken);
+
+    public Task<IpcMessage> UnpairAsync(string deviceId, CancellationToken cancellationToken) =>
+        ExchangeMessageAsync(
+            new IpcMessage { Type = IpcProtocol.TypeUnpair, DeviceId = deviceId },
+            IpcProtocol.TypeUnpairAck,
+            cancellationToken);
+
+    public Task<IpcMessage> SecurePingAsync(string deviceId, CancellationToken cancellationToken) =>
+        ExchangeMessageAsync(
+            new IpcMessage { Type = IpcProtocol.TypeSecurePing, DeviceId = deviceId },
+            IpcProtocol.TypePingResult,
+            cancellationToken);
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -182,23 +218,27 @@ public sealed class AgentIpcClient : IAsyncDisposable
         }
     }
 
-    private async Task<IpcMessage> ExchangeAsync(
+    private Task<IpcMessage> ExchangeAsync(
         string requestType,
+        string expectedResponseType,
+        CancellationToken cancellationToken) =>
+        ExchangeMessageAsync(new IpcMessage { Type = requestType }, expectedResponseType, cancellationToken);
+
+    private async Task<IpcMessage> ExchangeMessageAsync(
+        IpcMessage request,
         string expectedResponseType,
         CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(request);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var id = Interlocked.Increment(ref _nextId);
+            request.ProtocolVersion = IpcProtocol.Version;
+            request.Id = id;
             await _writer.WriteLineAsync(
-                    IpcProtocol.Serialize(new IpcMessage
-                    {
-                        Type = requestType,
-                        ProtocolVersion = IpcProtocol.Version,
-                        Id = id,
-                    }).AsMemory(),
+                    IpcProtocol.Serialize(request).AsMemory(),
                     cancellationToken)
                 .ConfigureAwait(false);
 

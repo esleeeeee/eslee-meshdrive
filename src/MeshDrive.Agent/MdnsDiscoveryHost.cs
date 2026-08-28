@@ -64,8 +64,7 @@ public sealed class MdnsDiscoveryHost : IDisposable
             IsRunning = true;
             return true;
         }
-        catch (Exception exception) when (
-            exception is SocketException or IOException or InvalidOperationException or ObjectDisposedException)
+        catch (Exception)
         {
             Cleanup();
             return false;
@@ -102,27 +101,36 @@ public sealed class MdnsDiscoveryHost : IDisposable
                     continue;
                 }
 
-                var addresses = records.OfType<AddressRecord>()
+                var advertised = records.OfType<AddressRecord>()
                     .Where(record => record.Name.Equals(srv.Target))
                     .Select(record => record.Address);
-                IPAddress? fallback = e.RemoteEndPoint.Address;
-                if (!DiscoveryTxt.TrySelectIpv4(addresses, fallback, out var ipv4))
+                if (!DiscoveryTxt.TrySelectConnectionAddresses(
+                        e.RemoteEndPoint?.Address,
+                        advertised,
+                        out var ipv4,
+                        out var fallbacks))
                 {
                     continue;
                 }
 
-                _directory.Upsert(new PeerSighting(deviceId, name, ipv4, srv.Port), DateTimeOffset.UtcNow);
+                _directory.Upsert(new PeerSighting(deviceId, name, ipv4, srv.Port, fallbacks), DateTimeOffset.UtcNow);
             }
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or FormatException)
+        catch (Exception)
         {
         }
     }
 
     private void OnInstanceShutdown(object? sender, ServiceInstanceShutdownEventArgs e)
     {
-        var deviceId = DiscoveryNames.InstanceDeviceId(e.ServiceInstanceName.ToString());
-        _directory.MarkOffline(deviceId, DateTimeOffset.UtcNow);
+        try
+        {
+            var deviceId = DiscoveryNames.InstanceDeviceId(e.ServiceInstanceName.ToString());
+            _directory.MarkOffline(deviceId, DateTimeOffset.UtcNow);
+        }
+        catch (Exception)
+        {
+        }
     }
 
     private void OnTimer(object? state)
@@ -132,7 +140,7 @@ public sealed class MdnsDiscoveryHost : IDisposable
         {
             _serviceDiscovery?.QueryServiceInstances(DiscoveryNames.ServiceType);
         }
-        catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException)
+        catch (Exception)
         {
         }
     }

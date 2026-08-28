@@ -11,4 +11,13 @@
     <ProjectReference Include="..\MeshDrive.Protocol\MeshDrive.Protocol.csproj" />
     <ProjectReference Include="..\MeshDrive.Agent\MeshDrive.Agent.csproj" />
   </ItemGroup>
+  <Target Name="CopyAgentRuntimeFiles" AfterTargets="Build">
+    <PropertyGroup>
+      <_AgentOutDir>$(MSBuildThisFileDirectory)..\MeshDrive.Agent\bin\$(Configuration)\$(TargetFramework)\</_AgentOutDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <_AgentRuntime Include="$(_AgentOutDir)*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_AgentRuntime)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

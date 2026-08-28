@@ -16,7 +16,9 @@ public sealed class AgentIpcServer : IAsyncDisposable
     private readonly string _deviceId;
     private readonly string _deviceName;
     private readonly string _discovery;
+    private readonly Func<string>? _discoveryProvider;
     private readonly Func<IReadOnlyList<DiscoveredPeer>>? _listPeers;
+    private readonly Func<IpcMessage, CancellationToken, Task<IpcMessage?>>? _handleCommand;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentDictionary<Task, byte> _sessions = new();
@@ -32,7 +34,9 @@ public sealed class AgentIpcServer : IAsyncDisposable
         string? deviceId = null,
         string? deviceName = null,
         string? discovery = null,
-        Func<IReadOnlyList<DiscoveredPeer>>? listPeers = null)
+        Func<IReadOnlyList<DiscoveredPeer>>? listPeers = null,
+        Func<IpcMessage, CancellationToken, Task<IpcMessage?>>? handleCommand = null,
+        Func<string>? discoveryProvider = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pipeName);
         _pipeName = pipeName;
@@ -43,6 +47,8 @@ public sealed class AgentIpcServer : IAsyncDisposable
         _deviceName = deviceName ?? string.Empty;
         _discovery = string.IsNullOrWhiteSpace(discovery) ? DiscoveryNames.DiscoveryOff : discovery;
         _listPeers = listPeers;
+        _handleCommand = handleCommand;
+        _discoveryProvider = discoveryProvider;
     }
 
     public bool IsShutdownRequested => Volatile.Read(ref _shutdownRequested) != 0;
@@ -249,6 +255,18 @@ public sealed class AgentIpcServer : IAsyncDisposable
                         continue;
                     }
 
+                    if (_handleCommand is not null)
+                    {
+                        var handled = await _handleCommand(message, cancellationToken).ConfigureAwait(false);
+                        if (handled is not null)
+                        {
+                            handled.Id = message.Id;
+                            handled.ProtocolVersion = IpcProtocol.Version;
+                            await WriteAsync(writer, handled, cancellationToken).ConfigureAwait(false);
+                            continue;
+                        }
+                    }
+
                     if (string.Equals(message.Type, IpcProtocol.TypeShutdown, StringComparison.Ordinal))
                     {
                         await WriteAsync(
@@ -308,7 +326,7 @@ public sealed class AgentIpcServer : IAsyncDisposable
             ClientCount = Math.Max(Volatile.Read(ref _clientCount), 0),
             DeviceId = string.IsNullOrWhiteSpace(_deviceId) ? null : _deviceId,
             DeviceName = string.IsNullOrWhiteSpace(_deviceName) ? null : _deviceName,
-            Discovery = _discovery,
+            Discovery = _discoveryProvider?.Invoke() ?? _discovery,
         };
     }
 

@@ -129,6 +129,10 @@ public partial class MainWindow : Window
             ShowStatus(status);
             var peers = await _client.GetPeersAsync(CancellationToken.None);
             ShowPeers(peers);
+            var pairing = await _client.GetPairingAsync(CancellationToken.None);
+            ShowPairing(pairing);
+            var trusted = await _client.GetTrustedAsync(CancellationToken.None);
+            ShowTrusted(trusted);
         }
         catch (Exception exception)
         {
@@ -169,12 +173,54 @@ public partial class MainWindow : Window
 
     private void ShowPeers(IReadOnlyList<DiscoveredPeer> peers)
     {
+        var selectedId = (PeerList.SelectedItem as PeerRow)?.DeviceId;
         var rows = peers.Select(static peer => new PeerRow(
+            peer.DeviceId,
             peer.Name,
             peer.IsOnline ? "온라인" : "오프라인",
-            string.IsNullOrWhiteSpace(peer.Ipv4) ? "-" : peer.Ipv4)).ToArray();
+            FormatTrust(peer.TrustState),
+            string.IsNullOrWhiteSpace(peer.Ipv4) ? "-" : peer.Ipv4,
+            peer.IsOnline && peer.TrustState != TrustStates.Trusted)).ToArray();
         PeerList.ItemsSource = rows;
         EmptyPeersText.Visibility = rows.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (selectedId is not null)
+        {
+            PeerList.SelectedItem = rows.FirstOrDefault(row => row.DeviceId == selectedId);
+        }
+
+        UpdatePairButton();
+    }
+
+    private void ShowPairing(IpcMessage pairing)
+    {
+        var waiting = string.Equals(pairing.PairingStatus, "waiting", StringComparison.OrdinalIgnoreCase) &&
+            !string.IsNullOrWhiteSpace(pairing.Sas);
+        PairingBanner.Visibility = waiting ? Visibility.Visible : Visibility.Collapsed;
+        if (!waiting)
+        {
+            return;
+        }
+
+        PairingPeerText.Text = string.IsNullOrWhiteSpace(pairing.DeviceName)
+            ? pairing.DeviceId
+            : pairing.DeviceName + "와 페어링";
+        PairingSasText.Text = SasCalculator.FormatDisplay(pairing.Sas ?? string.Empty);
+    }
+
+    private void ShowTrusted(IpcMessage trusted)
+    {
+        var selectedId = (TrustedList.SelectedItem as TrustedRow)?.DeviceId;
+        var rows = (trusted.Trusted ?? [])
+            .Where(static item => !string.IsNullOrWhiteSpace(item.DeviceId))
+            .Select(static item => new TrustedRow(item.DeviceId!, item.Name ?? item.DeviceId!))
+            .ToArray();
+        TrustedList.ItemsSource = rows;
+        if (selectedId is not null)
+        {
+            TrustedList.SelectedItem = rows.FirstOrDefault(row => row.DeviceId == selectedId);
+        }
+
+        UpdateUnpairButton();
     }
 
     private void SetPending(string message)
@@ -197,8 +243,98 @@ public partial class MainWindow : Window
         DiscoveryText.Text = "-";
         PeerList.ItemsSource = Array.Empty<PeerRow>();
         EmptyPeersText.Visibility = Visibility.Visible;
+        TrustedList.ItemsSource = Array.Empty<TrustedRow>();
+        PairingBanner.Visibility = Visibility.Collapsed;
+        PairButton.IsEnabled = false;
+        UnpairButton.IsEnabled = false;
         MessageText.Text = message;
     }
+
+    private async void Pair_Click(object sender, RoutedEventArgs e)
+    {
+        if (_client is null || PeerList.SelectedItem is not PeerRow peer)
+        {
+            return;
+        }
+
+        try
+        {
+            var pairing = await _client.StartPairingAsync(peer.DeviceId, ipv4: null, port: null, CancellationToken.None);
+            ShowPairing(pairing);
+            MessageText.Text = "상대 기기에도 같은 인증번호가 보이는지 확인하세요.";
+        }
+        catch (Exception exception)
+        {
+            MessageText.Text = "페어링을 시작하지 못했습니다. " + exception.Message;
+        }
+    }
+
+    private async void ApprovePairing_Click(object sender, RoutedEventArgs e) =>
+        await DecidePairingAsync(accepted: true);
+
+    private async void RejectPairing_Click(object sender, RoutedEventArgs e) =>
+        await DecidePairingAsync(accepted: false);
+
+    private async void Unpair_Click(object sender, RoutedEventArgs e)
+    {
+        if (_client is null || TrustedList.SelectedItem is not TrustedRow trusted)
+        {
+            return;
+        }
+
+        try
+        {
+            await _client.UnpairAsync(trusted.DeviceId, CancellationToken.None);
+            var remaining = await _client.GetTrustedAsync(CancellationToken.None);
+            ShowTrusted(remaining);
+            var peers = await _client.GetPeersAsync(CancellationToken.None);
+            ShowPeers(peers);
+            MessageText.Text = "연결을 해제했습니다. 다시 쓰려면 페어링해야 합니다.";
+        }
+        catch (Exception exception)
+        {
+            MessageText.Text = "연결 해제에 실패했습니다. " + exception.Message;
+        }
+    }
+
+    private void PeerList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) =>
+        UpdatePairButton();
+
+    private void TrustedList_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) =>
+        UpdateUnpairButton();
+
+    private async Task DecidePairingAsync(bool accepted)
+    {
+        if (_client is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var pairing = await _client.DecidePairingAsync(accepted, CancellationToken.None);
+            ShowPairing(pairing);
+            var trusted = await _client.GetTrustedAsync(CancellationToken.None);
+            ShowTrusted(trusted);
+            var peers = await _client.GetPeersAsync(CancellationToken.None);
+            ShowPeers(peers);
+            MessageText.Text = accepted
+                ? (string.Equals(pairing.PairingStatus, "completed", StringComparison.OrdinalIgnoreCase)
+                    ? "페어링이 완료되었습니다."
+                    : "승인을 보냈습니다. 상대 기기의 승인을 기다립니다.")
+                : "페어링을 거절했습니다.";
+        }
+        catch (Exception exception)
+        {
+            MessageText.Text = "페어링 결정에 실패했습니다. " + exception.Message;
+        }
+    }
+
+    private void UpdatePairButton() =>
+        PairButton.IsEnabled = _client is not null && PeerList.SelectedItem is PeerRow peer && peer.CanPair;
+
+    private void UpdateUnpairButton() =>
+        UnpairButton.IsEnabled = _client is not null && TrustedList.SelectedItem is TrustedRow;
 
     private async Task DisposeClientAsync()
     {
@@ -243,6 +379,15 @@ public partial class MainWindow : Window
         string.Equals(discovery, DiscoveryNames.DiscoveryMdns, StringComparison.Ordinal)
             ? "mDNS"
             : "꺼짐";
+
+    private static string FormatTrust(string trustState) => trustState switch
+    {
+        TrustStates.Trusted => "신뢰됨",
+        TrustStates.Pending => "페어링 중",
+        _ => "미페어링",
+    };
 }
 
-public sealed record PeerRow(string Name, string Status, string Ipv4);
+public sealed record PeerRow(string DeviceId, string Name, string Status, string Trust, string Ipv4, bool CanPair);
+
+public sealed record TrustedRow(string DeviceId, string Name);

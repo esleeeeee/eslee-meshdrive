@@ -29,13 +29,18 @@ public sealed class PeerDirectory
         var name = string.IsNullOrWhiteSpace(sighting.Name) ? sighting.DeviceId : sighting.Name.Trim();
         lock (_gate)
         {
+            var existingTrust = _peers.TryGetValue(sighting.DeviceId, out var existing)
+                ? existing.TrustState
+                : TrustStates.Unpaired;
             _peers[sighting.DeviceId] = new DiscoveredPeer(
                 sighting.DeviceId,
                 name,
                 sighting.Ipv4,
                 sighting.Port,
                 IsOnline: true,
-                now);
+                now,
+                sighting.FallbackIpv4s ?? existing?.FallbackIpv4s,
+                existingTrust);
         }
     }
 

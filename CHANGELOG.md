@@ -1,5 +1,12 @@
 # 변경 기록
 
+## 0.0.3 — Phase 2
+
+- 설치마다 ECDSA 장치 인증서를 만들고, 개인키는 Windows 사용자 DPAPI로 보호합니다.
+- 발견된 기기와 6자리 SAS 페어링을 합니다. 양쪽이 모두 승인한 뒤에만 상대 인증서를 신뢰합니다.
+- 페어링된 Agent만 HTTPS 보호 API를 사용할 수 있습니다. 미페어링·다른 인증서·연결 해제 뒤에는 거부합니다.
+- mDNS 패킷을 보낸 IPv4를 HTTPS 연결 주소로 우선하고, 광고된 다른 주소는 fallback입니다.
+
 ## 0.0.2 — Phase 1
 
 - Agent가 `_meshdrive._tcp.local` mDNS 서비스를 광고하고 같은 LAN의 MeshDrive를 찾습니다.

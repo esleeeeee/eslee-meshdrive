@@ -2,7 +2,7 @@
 
 eslee MeshDrive는 같은 네트워크의 PC끼리 파일을 직접 다루는 Windows 앱입니다.
 
-지금 저장소는 **Phase 1**입니다. GUI와 Agent는 따로 실행되고, Agent가 같은 공유기에서 MeshDrive 기기를 mDNS로 찾습니다.
+지금 저장소는 **Phase 2**입니다. 같은 공유기에서 기기를 찾은 뒤, 6자리 SAS로 페어링하고 승인한 기기만 HTTPS로 신뢰합니다.
 
 문서 언어: **한국어**
 
@@ -12,16 +12,16 @@ eslee MeshDrive는 같은 네트워크의 PC끼리 파일을 직접 다루는 Wi
 
 - `MeshDrive.Core`, `MeshDrive.Protocol`, `MeshDrive.Agent`, `MeshDrive.Windows`
 - GUI와 Agent의 별도 프로세스
-- Named Pipe IPC (`get-status`, `get-peers`, `shutdown`)
-- GUI에서 Agent 상태와 주변 MeshDrive 기기 표시
+- Named Pipe IPC (`get-status`, `get-peers`, `start-pairing`, `shutdown`)
+- GUI에서 Agent 상태, 주변 기기, 페어링 SAS, 신뢰된 기기 표시
 - `_meshdrive._tcp.local` mDNS 광고와 탐색
 - Ethernet과 Wi-Fi를 함께 쓰는 LAN 발견
+- SAS 페어링과 장치 인증서 기반 HTTPS
 - 창 닫기 시 Agent 유지, 재실행 시 재연결
 - 전체 종료 명령에서만 Agent 종료
 
 아직 없음:
 
-- 페어링, SAS, HTTPS 인증
 - 파일 탐색, 스트리밍
 - QuickSend, TrayFolder 연동
 - 설치 프로그램
@@ -53,6 +53,8 @@ GUI가 Agent를 찾고, 없으면 `MeshDrive.Agent.exe`를 같은 폴더에서 �
 - GUI를 다시 실행하면 기존 Agent에 재연결합니다. Agent 프로세스 ID와 시작 시각은 같고, 이 창 세션 값은 달라집니다.
 - **MeshDrive 종료**: Agent에 종료 명령을 보낸 뒤 GUI도 닫습니다.
 - **주변 MeshDrive**: 같은 공유기에서 발견된 다른 PC의 이름, 온라인 상태, IPv4 주소가 나타납니다. 이 PC 자신은 목록에 없습니다.
+- **연결 요청**: 미페어링 기기를 고른 뒤 양쪽 화면에 같은 6자리 번호가 보이면 승인합니다. 한쪽만 승인해서는 신뢰되지 않습니다.
+- **신뢰된 기기**: 페어링이 끝난 기기 목록입니다. **연결 해제** 뒤에는 다시 페어링하기 전까지 HTTPS가 거부됩니다.
 
 작업 관리자에서 `MeshDrive.Agent`와 `MeshDrive.Windows`를 구분해 확인할 수 있습니다.
 
@@ -62,7 +64,7 @@ GUI가 Agent를 찾고, 없으면 `MeshDrive.Agent.exe`를 같은 폴더에서 �
 
 | 프로젝트 | 역할 |
 |---|---|
-| `MeshDrive.Core` | 제품 이름, Device ID, 발견 상태 |
+| `MeshDrive.Core` | 제품 이름, Device ID, SAS, 신뢰 저장 |
 | `MeshDrive.Protocol` | Named Pipe JSON 프로토콜, 서버/클라이언트 |
 | `MeshDrive.Agent` | 백그라운드 Agent 프로세스 |
 | `MeshDrive.Windows` | WPF GUI |
