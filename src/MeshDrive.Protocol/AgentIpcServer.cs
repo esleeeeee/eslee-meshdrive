@@ -13,6 +13,10 @@ public sealed class AgentIpcServer : IAsyncDisposable
     private readonly DateTimeOffset _startedAt;
     private readonly int _processId;
     private readonly string _version;
+    private readonly string _deviceId;
+    private readonly string _deviceName;
+    private readonly string _discovery;
+    private readonly Func<IReadOnlyList<DiscoveredPeer>>? _listPeers;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ConcurrentDictionary<Task, byte> _sessions = new();
@@ -20,13 +24,25 @@ public sealed class AgentIpcServer : IAsyncDisposable
     private int _shutdownRequested;
     private bool _disposed;
 
-    public AgentIpcServer(string pipeName, DateTimeOffset startedAt, int? processId = null, string? version = null)
+    public AgentIpcServer(
+        string pipeName,
+        DateTimeOffset startedAt,
+        int? processId = null,
+        string? version = null,
+        string? deviceId = null,
+        string? deviceName = null,
+        string? discovery = null,
+        Func<IReadOnlyList<DiscoveredPeer>>? listPeers = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pipeName);
         _pipeName = pipeName;
         _startedAt = startedAt;
         _processId = processId ?? Environment.ProcessId;
         _version = string.IsNullOrWhiteSpace(version) ? AppInfo.Version : version;
+        _deviceId = deviceId ?? string.Empty;
+        _deviceName = deviceName ?? string.Empty;
+        _discovery = string.IsNullOrWhiteSpace(discovery) ? DiscoveryNames.DiscoveryOff : discovery;
+        _listPeers = listPeers;
     }
 
     public bool IsShutdownRequested => Volatile.Read(ref _shutdownRequested) != 0;
@@ -226,6 +242,13 @@ public sealed class AgentIpcServer : IAsyncDisposable
                         continue;
                     }
 
+                    if (string.Equals(message.Type, IpcProtocol.TypeGetPeers, StringComparison.Ordinal))
+                    {
+                        await WriteAsync(writer, CreatePeersMessage(message.Id), cancellationToken)
+                            .ConfigureAwait(false);
+                        continue;
+                    }
+
                     if (string.Equals(message.Type, IpcProtocol.TypeShutdown, StringComparison.Ordinal))
                     {
                         await WriteAsync(
@@ -283,8 +306,20 @@ public sealed class AgentIpcServer : IAsyncDisposable
             Version = _version,
             SessionId = sessionId,
             ClientCount = Math.Max(Volatile.Read(ref _clientCount), 0),
+            DeviceId = string.IsNullOrWhiteSpace(_deviceId) ? null : _deviceId,
+            DeviceName = string.IsNullOrWhiteSpace(_deviceName) ? null : _deviceName,
+            Discovery = _discovery,
         };
     }
+
+    private IpcMessage CreatePeersMessage(int? id) =>
+        new()
+        {
+            Type = IpcProtocol.TypePeers,
+            ProtocolVersion = IpcProtocol.Version,
+            Id = id,
+            Peers = IpcProtocol.ToPeerPayloads(_listPeers?.Invoke() ?? []),
+        };
 
     private NamedPipeServerStream CreatePipe() =>
         new(

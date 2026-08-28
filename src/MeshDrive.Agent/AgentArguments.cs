@@ -2,7 +2,7 @@ using MeshDrive.Core;
 
 namespace MeshDrive.Agent;
 
-public sealed record AgentHostOptions(string PipeName, string MutexName);
+public sealed record AgentHostOptions(string PipeName, string MutexName, string DataDirectory, bool EnableMdns);
 
 public static class AgentArguments
 {
@@ -11,6 +11,8 @@ public static class AgentArguments
         ArgumentNullException.ThrowIfNull(args);
         string? pipeName = null;
         string? mutexName = null;
+        string? dataDirectory = null;
+        var enableMdns = true;
         for (var index = 0; index < args.Count; index++)
         {
             var argument = args[index];
@@ -36,6 +38,23 @@ public static class AgentArguments
                 continue;
             }
 
+            if (argument is "--data-dir")
+            {
+                if (!TryReadValue(args, ref index, "--data-dir", out dataDirectory, out error))
+                {
+                    options = null!;
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (argument is "--disable-mdns")
+            {
+                enableMdns = false;
+                continue;
+            }
+
             options = null!;
             error = $"알 수 없는 인수입니다: {argument}";
             return false;
@@ -43,7 +62,9 @@ public static class AgentArguments
 
         options = new AgentHostOptions(
             string.IsNullOrWhiteSpace(pipeName) ? IpcNames.DefaultPipeName : pipeName,
-            string.IsNullOrWhiteSpace(mutexName) ? IpcNames.DefaultMutexName : mutexName);
+            string.IsNullOrWhiteSpace(mutexName) ? IpcNames.DefaultMutexName : mutexName,
+            string.IsNullOrWhiteSpace(dataDirectory) ? AppPaths.DefaultDataDirectory : dataDirectory,
+            enableMdns);
         error = string.Empty;
         return true;
     }

@@ -37,6 +37,39 @@ public sealed class IpcMessage
     [JsonPropertyName("clientCount")]
     public int? ClientCount { get; set; }
 
+    [JsonPropertyName("deviceId")]
+    public string? DeviceId { get; set; }
+
+    [JsonPropertyName("deviceName")]
+    public string? DeviceName { get; set; }
+
+    [JsonPropertyName("discovery")]
+    public string? Discovery { get; set; }
+
+    [JsonPropertyName("peers")]
+    public List<IpcPeer>? Peers { get; set; }
+
     [JsonPropertyName("error")]
     public string? Error { get; set; }
+}
+
+public sealed class IpcPeer
+{
+    [JsonPropertyName("deviceId")]
+    public string? DeviceId { get; set; }
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("ipv4")]
+    public string? Ipv4 { get; set; }
+
+    [JsonPropertyName("port")]
+    public int? Port { get; set; }
+
+    [JsonPropertyName("online")]
+    public bool? Online { get; set; }
+
+    [JsonPropertyName("lastSeen")]
+    public DateTimeOffset? LastSeen { get; set; }
 }

@@ -68,5 +68,21 @@
             <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
+        <Style TargetType="ListView">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        </Style>
+        <Style TargetType="GridViewColumnHeader">
+            <Setter Property="Background" Value="#222830" />
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}" />
+            <Setter Property="Padding" Value="8,6" />
+        </Style>
+        <Style TargetType="ListViewItem">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="0,4" />
+        </Style>
     </Application.Resources>
 </Application>

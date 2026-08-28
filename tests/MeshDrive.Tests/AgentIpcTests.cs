@@ -1,3 +1,4 @@
+using MeshDrive.Core;
 using MeshDrive.Protocol;
 
 namespace MeshDrive.Tests;
@@ -66,6 +67,44 @@ public sealed class AgentIpcTests
         var status = await client.GetStatusAsync(CancellationToken.None);
         Assert.AreEqual(IpcProtocol.StateRunning, status.State);
 
+        await client.ShutdownAsync(CancellationToken.None);
+        await run.WaitAsync(TestTimeout);
+    }
+
+    [TestMethod]
+    public async Task GetPeersReturnsSnapshotAndLeavesAgentRunning()
+    {
+        var pipeName = UniquePipe();
+        var now = new DateTimeOffset(2026, 8, 28, 12, 0, 0, TimeSpan.Zero);
+        IReadOnlyList<DiscoveredPeer> peers =
+        [
+            new("laptop1", "Laptop", "192.168.0.12", 41241, true, now),
+            new("desktop1", "Desktop", "192.168.0.5", 41241, false, now),
+        ];
+        await using var server = new AgentIpcServer(
+            pipeName,
+            DateTimeOffset.Now,
+            deviceId: "localid",
+            deviceName: "This-PC",
+            discovery: DiscoveryNames.DiscoveryMdns,
+            listPeers: () => peers);
+        var run = server.RunAsync(CancellationToken.None);
+        await using var client = await AgentIpcClient.ConnectAsync(pipeName, TestTimeout, CancellationToken.None);
+
+        var status = await client.GetStatusAsync(CancellationToken.None);
+        Assert.AreEqual("localid", status.DeviceId);
+        Assert.AreEqual("This-PC", status.DeviceName);
+        Assert.AreEqual(DiscoveryNames.DiscoveryMdns, status.Discovery);
+
+        var listed = await client.GetPeersAsync(CancellationToken.None);
+        Assert.HasCount(2, listed);
+        Assert.AreEqual("Laptop", listed[0].Name);
+        Assert.AreEqual("192.168.0.12", listed[0].Ipv4);
+        Assert.IsTrue(listed[0].IsOnline);
+        Assert.AreEqual("Desktop", listed[1].Name);
+        Assert.IsFalse(listed[1].IsOnline);
+
+        Assert.IsFalse(server.IsShutdownRequested);
         await client.ShutdownAsync(CancellationToken.None);
         await run.WaitAsync(TestTimeout);
     }

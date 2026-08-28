@@ -13,6 +13,8 @@ public sealed class AgentArgumentsTests
         Assert.AreEqual(string.Empty, error);
         Assert.AreEqual(IpcNames.DefaultPipeName, options.PipeName);
         Assert.AreEqual(IpcNames.DefaultMutexName, options.MutexName);
+        Assert.AreEqual(AppPaths.DefaultDataDirectory, options.DataDirectory);
+        Assert.IsTrue(options.EnableMdns);
     }
 
     [TestMethod]
@@ -25,6 +27,19 @@ public sealed class AgentArgumentsTests
         Assert.AreEqual(string.Empty, error);
         Assert.AreEqual("mdt-pipe", options.PipeName);
         Assert.AreEqual(@"Local\mdt-mutex", options.MutexName);
+        Assert.IsTrue(options.EnableMdns);
+    }
+
+    [TestMethod]
+    public void ParseReadsDataDirectoryAndDisableMdns()
+    {
+        Assert.IsTrue(AgentArguments.TryParse(
+            ["--data-dir", @"C:\tmp\md", "--disable-mdns"],
+            out var options,
+            out var error));
+        Assert.AreEqual(string.Empty, error);
+        Assert.AreEqual(@"C:\tmp\md", options.DataDirectory);
+        Assert.IsFalse(options.EnableMdns);
     }
 
     [TestMethod]

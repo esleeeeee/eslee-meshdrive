@@ -104,9 +104,9 @@ public partial class MainWindow : Window
 
         try
         {
-            SetPending(restartIfMissing ? "Agent에 연결하는 중..." : "상태를 확인하는 중...");
             if (_client is null)
             {
+                SetPending(restartIfMissing ? "Agent에 연결하는 중..." : "상태를 확인하는 중...");
                 if (restartIfMissing)
                 {
                     _client = await AgentIpcClient.ConnectOrStartAsync(
@@ -127,6 +127,8 @@ public partial class MainWindow : Window
 
             var status = await _client.GetStatusAsync(CancellationToken.None);
             ShowStatus(status);
+            var peers = await _client.GetPeersAsync(CancellationToken.None);
+            ShowPeers(peers);
         }
         catch (Exception exception)
         {
@@ -160,9 +162,19 @@ public partial class MainWindow : Window
         UptimeText.Text = FormatUptime(status.UptimeSeconds);
         ProtocolText.Text = status.ProtocolVersion.ToString(CultureInfo.InvariantCulture);
         VersionText.Text = status.Version;
-        SessionText.Text = status.SessionId;
-        ClientCountText.Text = status.ClientCount.ToString(CultureInfo.InvariantCulture);
+        DeviceNameText.Text = string.IsNullOrWhiteSpace(status.DeviceName) ? "-" : status.DeviceName;
+        DiscoveryText.Text = FormatDiscovery(status.Discovery);
         MessageText.Text = "창을 닫아도 Agent는 계속 실행됩니다. 다시 실행하면 같은 Agent에 재연결합니다.";
+    }
+
+    private void ShowPeers(IReadOnlyList<DiscoveredPeer> peers)
+    {
+        var rows = peers.Select(static peer => new PeerRow(
+            peer.Name,
+            peer.IsOnline ? "온라인" : "오프라인",
+            string.IsNullOrWhiteSpace(peer.Ipv4) ? "-" : peer.Ipv4)).ToArray();
+        PeerList.ItemsSource = rows;
+        EmptyPeersText.Visibility = rows.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void SetPending(string message)
@@ -181,8 +193,10 @@ public partial class MainWindow : Window
         UptimeText.Text = "-";
         ProtocolText.Text = "-";
         VersionText.Text = "-";
-        SessionText.Text = "-";
-        ClientCountText.Text = "-";
+        DeviceNameText.Text = "-";
+        DiscoveryText.Text = "-";
+        PeerList.ItemsSource = Array.Empty<PeerRow>();
+        EmptyPeersText.Visibility = Visibility.Visible;
         MessageText.Text = message;
     }
 
@@ -224,4 +238,11 @@ public partial class MainWindow : Window
 
         return $"{value.Seconds}초";
     }
+
+    private static string FormatDiscovery(string discovery) =>
+        string.Equals(discovery, DiscoveryNames.DiscoveryMdns, StringComparison.Ordinal)
+            ? "mDNS"
+            : "꺼짐";
 }
+
+public sealed record PeerRow(string Name, string Status, string Ipv4);

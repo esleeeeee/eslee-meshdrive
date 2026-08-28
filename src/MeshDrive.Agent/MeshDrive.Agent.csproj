@@ -9,4 +9,7 @@
     <ProjectReference Include="..\MeshDrive.Core\MeshDrive.Core.csproj" />
     <ProjectReference Include="..\MeshDrive.Protocol\MeshDrive.Protocol.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
+  </ItemGroup>
 </Project>

@@ -1,3 +1,4 @@
+using MeshDrive.Core;
 using MeshDrive.Protocol;
 
 namespace MeshDrive.Agent;
@@ -12,14 +13,34 @@ public static class AgentRuntime
             return 0;
         }
 
+        MdnsDiscoveryHost? mdns = null;
         try
         {
-            await using var server = new AgentIpcServer(options.PipeName, DateTimeOffset.Now);
+            var identity = DeviceIdentityStore.LoadOrCreate(options.DataDirectory);
+            var directory = new PeerDirectory(identity.DeviceId, DiscoveryNames.OfflineAfter);
+            var discovery = DiscoveryNames.DiscoveryOff;
+            if (options.EnableMdns)
+            {
+                mdns = new MdnsDiscoveryHost(identity, directory);
+                if (mdns.TryStart())
+                {
+                    discovery = DiscoveryNames.DiscoveryMdns;
+                }
+            }
+
+            await using var server = new AgentIpcServer(
+                options.PipeName,
+                DateTimeOffset.Now,
+                deviceId: identity.DeviceId,
+                deviceName: identity.DeviceName,
+                discovery: discovery,
+                listPeers: directory.Snapshot);
             await server.RunAsync(cancellationToken).ConfigureAwait(false);
             return 0;
         }
         finally
         {
+            mdns?.Dispose();
             if (ownsMutex && mutex is not null)
             {
                 try

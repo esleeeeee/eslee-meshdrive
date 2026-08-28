@@ -8,4 +8,7 @@ public sealed record AgentStatus(
     int ProtocolVersion,
     string Version,
     string SessionId,
-    int ClientCount);
+    int ClientCount,
+    string DeviceId,
+    string DeviceName,
+    string Discovery);

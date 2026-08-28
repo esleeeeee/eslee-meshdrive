@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using MeshDrive.Core;
 
 namespace MeshDrive.Protocol;
 
@@ -15,6 +16,8 @@ public static class IpcProtocol
     public const string TypeStatus = "status";
     public const string TypeShutdown = "shutdown";
     public const string TypeShutdownAck = "shutdown-ack";
+    public const string TypeGetPeers = "get-peers";
+    public const string TypePeers = "peers";
     public const string TypeError = "error";
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
@@ -75,6 +78,57 @@ public static class IpcProtocol
             message.ProtocolVersion ?? Version,
             message.Version ?? string.Empty,
             message.SessionId ?? string.Empty,
-            message.ClientCount ?? 0);
+            message.ClientCount ?? 0,
+            message.DeviceId ?? string.Empty,
+            message.DeviceName ?? string.Empty,
+            message.Discovery ?? string.Empty);
+    }
+
+    public static IReadOnlyList<DiscoveredPeer> ToPeers(IpcMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        if (message.Peers is null || message.Peers.Count == 0)
+        {
+            return [];
+        }
+
+        var peers = new List<DiscoveredPeer>(message.Peers.Count);
+        foreach (var payload in message.Peers)
+        {
+            if (payload is null || string.IsNullOrWhiteSpace(payload.DeviceId))
+            {
+                continue;
+            }
+
+            peers.Add(new DiscoveredPeer(
+                payload.DeviceId,
+                string.IsNullOrWhiteSpace(payload.Name) ? payload.DeviceId : payload.Name,
+                payload.Ipv4 ?? string.Empty,
+                payload.Port ?? DiscoveryNames.DefaultPort,
+                payload.Online ?? false,
+                payload.LastSeen ?? DateTimeOffset.MinValue));
+        }
+
+        return peers;
+    }
+
+    public static List<IpcPeer> ToPeerPayloads(IReadOnlyList<DiscoveredPeer> peers)
+    {
+        ArgumentNullException.ThrowIfNull(peers);
+        var payloads = new List<IpcPeer>(peers.Count);
+        foreach (var peer in peers)
+        {
+            payloads.Add(new IpcPeer
+            {
+                DeviceId = peer.DeviceId,
+                Name = peer.Name,
+                Ipv4 = peer.Ipv4,
+                Port = peer.Port,
+                Online = peer.IsOnline,
+                LastSeen = peer.LastSeen,
+            });
+        }
+
+        return payloads;
     }
 }

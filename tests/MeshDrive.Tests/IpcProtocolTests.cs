@@ -60,5 +60,7 @@ public sealed class IpcProtocolTests
         Assert.AreEqual(0, status.ProcessId);
         Assert.AreEqual(IpcProtocol.Version, status.ProtocolVersion);
         Assert.AreEqual(string.Empty, status.SessionId);
+        Assert.AreEqual(string.Empty, status.DeviceId);
+        Assert.AreEqual(string.Empty, status.Discovery);
     }
 }
