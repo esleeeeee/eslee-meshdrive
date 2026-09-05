@@ -18,7 +18,8 @@ public static class AgentRuntime
         LocalStreamBridge? bridge = null;
         try
         {
-            var identity = DeviceIdentityStore.LoadOrCreate(options.DataDirectory);
+            var settings = AgentSettings.Load(options.DataDirectory);
+            var identity = DeviceIdentityStore.LoadOrCreate(options.DataDirectory, settings.DeviceName);
             var credential = DeviceCredentialStore.LoadOrCreate(options.DataDirectory, identity.DeviceId);
             var trust = new TrustedPeerStore(options.DataDirectory);
             var directory = new PeerDirectory(identity.DeviceId, DiscoveryNames.OfflineAfter);
@@ -29,13 +30,13 @@ public static class AgentRuntime
                 directory,
                 options.HttpsPort);
             var discovery = DiscoveryNames.DiscoveryOff;
-            var storage = new StorageService(new SharedFolderStore(options.DataDirectory));
+            var storage = new StorageService(new SharedFolderStore(options.DataDirectory)) { Paused = settings.SharingPaused };
             var remoteStorage = new RemoteStorageClient(credential, coordinator);
             bridge = new LocalStreamBridge(remoteStorage);
             await bridge.StartAsync(cancellationToken).ConfigureAwait(false);
             using var photos = new RemotePhotoService(remoteStorage, options.DataDirectory);
             await using var transfers = new FileTransferService(remoteStorage, storage, options.DataDirectory);
-            var storageCommands = new StorageCoordinator(storage, remoteStorage) { Bridge = bridge, Photos = photos, Transfers = transfers };
+            var storageCommands = new StorageCoordinator(storage, remoteStorage) { Bridge = bridge, Photos = photos, Transfers = transfers, Settings = settings, DataDirectory = options.DataDirectory };
             await using var server = new AgentIpcServer(
                 options.PipeName,
                 DateTimeOffset.Now,
@@ -47,6 +48,12 @@ public static class AgentRuntime
                     ?? await coordinator.HandleIpcAsync(message, token).ConfigureAwait(false),
                 discoveryProvider: () => discovery);
             var ipc = server.RunAsync(cancellationToken);
+            using var exitSignal = options.PipeName == IpcNames.DefaultPipeName ? ApplicationExitSignal.Create() : null;
+            exitSignal?.Reset();
+            await using var tray = new TrayFolderConnection(() => storage.Paused,
+                value => { storage.Paused = value; settings.SharingPaused = value; settings.Save(options.DataDirectory); },
+                () => coordinator.ListPeers().Count(p => p.IsOnline && p.TrustState == TrustStates.Trusted), server.RequestShutdown);
+            if (options.PipeName == IpcNames.DefaultPipeName) tray.Start();
             if (options.EnableHttps)
             {
                 https = new AgentHttpsHost(identity, credential, coordinator, options.HttpsPort) { Storage = storage, Thumbnails = new PhotoCache(Path.Combine(options.DataDirectory, "thumbnails"), 256 * 1024 * 1024), Transfers = transfers };
@@ -69,6 +76,7 @@ public static class AgentRuntime
             }
 
             await ipc.ConfigureAwait(false);
+            if (server.IsShutdownRequested) exitSignal?.Set();
             return 0;
         }
         finally

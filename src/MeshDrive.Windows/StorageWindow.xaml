@@ -26,6 +26,16 @@
           </ListView>
         </DockPanel>
       </TabItem>
+      <TabItem Header="일반 설정">
+        <StackPanel Margin="24">
+          <TextBlock Text="계정 없이 내 기기를 연결하세요" FontSize="22" Margin="0,0,0,16"/>
+          <TextBlock Text="기기 이름 (다음 Agent 시작부터 적용)"/><TextBox x:Name="NameSetting" Width="320" HorizontalAlignment="Left" Margin="0,8,0,16"/>
+          <CheckBox x:Name="AutoStart" Content="Windows 로그인 시 Agent 자동 시작" IsChecked="True" Margin="0,0,0,16"/>
+          <Button Content="설정 저장 · 시작하기" Click="SaveSettings_Click" HorizontalAlignment="Left"/>
+          <TextBlock Text="공유 폴더 등록은 건너뛰어도 됩니다. 내 공유 폴더 탭에서 언제든 추가하세요." Margin="0,20" TextWrapping="Wrap"/>
+          <WrapPanel><Button Content="공유 일시 중지" Click="Pause_Click"/><Button Content="공유 다시 시작" Click="Resume_Click"/></WrapPanel>
+        </StackPanel>
+      </TabItem>
       <TabItem Header="내 공유 폴더">
         <DockPanel Margin="16">
           <StackPanel DockPanel.Dock="Top">

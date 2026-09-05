@@ -8,6 +8,7 @@ using MeshDrive.Protocol;
 
 namespace MeshDrive.Windows;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001", Justification = "Exit signal handle is disposed in the WPF Closed event.")]
 public partial class MainWindow : Window
 {
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
@@ -20,6 +21,7 @@ public partial class MainWindow : Window
     private AgentIpcClient? _client;
     private int _busy;
     private bool _fullExit;
+    private readonly EventWaitHandle _exitSignal = ApplicationExitSignal.Create();
 
     public MainWindow()
     {
@@ -36,6 +38,15 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         await ConnectAsync(restartIfMissing: true);
+        if (_client is not null)
+        {
+            try
+            {
+                var settings = System.Text.Json.Nodes.JsonNode.Parse((await _client.StorageAsync(new() { Action = "settings" })).Value!);
+                if (settings?["OnboardingComplete"]?.GetValue<bool>() != true) new StorageWindow { Owner = this }.Show();
+            }
+            catch (IOException) { }
+        }
         _refreshTimer.Start();
     }
 
@@ -91,6 +102,7 @@ public partial class MainWindow : Window
     private async void OnClosed(object? sender, EventArgs e)
     {
         _refreshTimer.Stop();
+        _exitSignal.Dispose();
         if (!_fullExit)
         {
             await DisposeClientAsync();
@@ -139,6 +151,7 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             await DisposeClientAsync();
+            if (!restartIfMissing && ApplicationExitSignal.IsRequested()) { Application.Current.Shutdown(); return; }
             SetDisconnected(restartIfMissing
                 ? "Agent에 연결하지 못했습니다. " + exception.Message
                 : "Agent 연결이 끊어졌습니다. 새로고침을 누르면 다시 연결합니다.");

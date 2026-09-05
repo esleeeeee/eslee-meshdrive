@@ -25,6 +25,9 @@ public partial class StorageWindow : Window
             _client = await AgentIpcClient.ConnectAsync(IpcNames.DefaultPipeName, TimeSpan.FromSeconds(5), _lifetime.Token);
             Devices.ItemsSource = (await _client.GetTrustedAsync(_lifetime.Token)).Trusted;
             LocalShares.ItemsSource = (await SendAsync(new())).LocalShares;
+            var settings = System.Text.Json.Nodes.JsonNode.Parse((await SendAsync(new() { Action = "settings" })).Value!);
+            NameSetting.Text = settings?["DeviceName"]?.GetValue<string>() ?? Environment.MachineName;
+            AutoStart.IsChecked = settings?["OnboardingComplete"]?.GetValue<bool>() != true || settings?["AutoStart"]?.GetValue<bool>() == true;
         });
         Closed += async (_, _) => { await _lifetime.CancelAsync(); if (_client is not null) await _client.DisposeAsync(); _lifetime.Dispose(); };
     }
@@ -87,6 +90,9 @@ public partial class StorageWindow : Window
         try { var result = await SendAsync(new() { Action = "transfers" }); Feedback.Text = string.Join("\n", result.Transfers?.Select(t => $"{t.Name} · {t.State} · {t.CompletedBytes:N0}/{t.TotalBytes:N0} bytes · {t.Result ?? t.Error}") ?? []); }
         catch (IOException error) { Feedback.Text = error.Message; }
     }
+    private async void SaveSettings_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => await SendAsync(new() { Action = "save-settings", Name = NameSetting.Text, Permissions = AutoStart.IsChecked == true ? SharePermissions.All : SharePermissions.None }));
+    private async void Pause_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => await SendAsync(new() { Action = "pause" }));
+    private async void Resume_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => await SendAsync(new() { Action = "resume" }));
     private async void OpenWith_Click(object sender, RoutedEventArgs e) => await RunAsync(() => OpenFileAsync(true));
     private void MusicPlayer_Click(object sender, RoutedEventArgs e) => ConfigurePlayer(true);
     private void VideoPlayer_Click(object sender, RoutedEventArgs e) => ConfigurePlayer(false);
