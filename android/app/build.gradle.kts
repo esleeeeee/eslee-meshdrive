@@ -3,6 +3,16 @@ android {
     namespace = "com.eslee.meshdrive"
     compileSdk = 36
     defaultConfig { applicationId = "com.eslee.meshdrive"; minSdk = 26; targetSdk = 36; versionCode = 1; versionName = "0.2.0" }
+    val signingFile = System.getenv("MESHDRIVE_KEYSTORE")
+    if (!signingFile.isNullOrBlank()) {
+        signingConfigs.create("localRelease") {
+            storeFile = file(signingFile)
+            storePassword = System.getenv("MESHDRIVE_STORE_PASSWORD")
+            keyAlias = "meshdrive"
+            keyPassword = System.getenv("MESHDRIVE_STORE_PASSWORD")
+        }
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("localRelease")
+    }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_21; targetCompatibility = JavaVersion.VERSION_21 }
     testOptions {
         unitTests.isIncludeAndroidResources = true
@@ -10,6 +20,7 @@ android {
     }
 }
 dependencies {
+    implementation("androidx.activity:activity:1.13.0")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.documentfile:documentfile:1.1.0")
     testImplementation("junit:junit:4.13.2")

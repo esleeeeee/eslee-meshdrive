@@ -1,7 +1,7 @@
 #ifndef PublishDir
   #define PublishDir "..\artifacts\publish"
 #endif
-#define AppVersion "0.1.0"
+#define AppVersion "0.2.0"
 [Setup]
 AppId={{9601ED02-95A7-49C8-BE5F-6E1390981464}
 AppName=eslee MeshDrive
@@ -44,6 +44,6 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
-    if MsgBox('현재 사용자 MeshDrive 설정, 페어링 정보와 캐시도 삭제할까요? 원본 공유 폴더는 삭제하지 않습니다.', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+    if MsgBox('현재 사용자 MeshDrive 설정, 페어링 정보, 캐시 및 동기화 이전 버전 백업을 모두 삭제할까요? 백업 삭제는 복구할 수 없습니다. 원본 공유 폴더는 삭제하지 않습니다.', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
       DelTree(ExpandConstant('{localappdata}\eslee\MeshDrive'), True, True, True);
 end;

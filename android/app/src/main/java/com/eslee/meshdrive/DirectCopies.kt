@@ -67,9 +67,7 @@ class DirectCopies(private val engine:MeshEngine):AutoCloseable {
                 while(parent.findFile(finalName)!=null){val f=File(name);finalName="${f.nameWithoutExtension} (${index++}).${f.extension}"}
                 val output=parent.createFile("application/octet-stream",".meshdrive-$id.part")?:throw java.io.IOException()
                 try {
-                    engine.context.contentResolver.openOutputStream(output.uri,"w")!!.use{out->staged.inputStream().use{input->
-                        val buffer=ByteArray(65536);while(true){check();val n=input.read(buffer);if(n<0)break;out.write(buffer,0,n)}
-                    }}
+                    DocumentCopies.publishNew(engine.context,staged,output.uri,check)
                     check();check(parent.findFile(finalName)==null&&output.renameTo(finalName))
                     progress("완료",staged.length(),staged.length());staged.delete()
                 }catch(e:Exception){output.delete();throw e}

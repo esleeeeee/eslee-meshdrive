@@ -31,7 +31,6 @@ public static class AgentRuntime
                 trust,
                 directory,
                 options.HttpsPort);
-            var discovery = DiscoveryNames.DiscoveryOff;
             var storage = new StorageService(new SharedFolderStore(options.DataDirectory)) { Paused = settings.SharingPaused };
             var remoteStorage = new RemoteStorageClient(credential, coordinator);
             bridge = new LocalStreamBridge(remoteStorage);
@@ -50,7 +49,7 @@ public static class AgentRuntime
                 listPeers: coordinator.ListPeers,
                 handleCommand: async (message, token) => await storageCommands.HandleAsync(message, token).ConfigureAwait(false)
                     ?? await coordinator.HandleIpcAsync(message, token).ConfigureAwait(false),
-                discoveryProvider: () => discovery);
+                discoveryProvider: () => mdns?.IsRunning == true ? DiscoveryNames.DiscoveryMdns : DiscoveryNames.DiscoveryOff);
             var ipc = server.RunAsync(cancellationToken);
             using var exitSignal = options.PipeName == IpcNames.DefaultPipeName ? ApplicationExitSignal.Create() : null;
             exitSignal?.Reset();
@@ -73,10 +72,7 @@ public static class AgentRuntime
             if (options.EnableMdns)
             {
                 mdns = new MdnsDiscoveryHost(identity, directory, options.HttpsPort);
-                if (mdns.TryStart())
-                {
-                    discovery = DiscoveryNames.DiscoveryMdns;
-                }
+                mdns.TryStart();
             }
 
             syncRunner.Start();

@@ -29,6 +29,14 @@ public sealed class TransferTests
         await restarted.ReceiveUploadAsync("peer", id, QuickSendAdapter.Pack(id, 0, bytes), CancellationToken.None);
         await restarted.ReceiveUploadAsync("peer", id, null, CancellationToken.None);
         CollectionAssert.AreEqual(bytes, await File.ReadAllBytesAsync(Path.Combine(node.Root, "copy.bin")));
+        await File.WriteAllTextAsync(Path.Combine(node.Root, "copy.bin"), "user edit");
+        await Assert.ThrowsExactlyAsync<IOException>(() => restarted.ReceiveUploadAsync("peer", id, null, CancellationToken.None));
+        var fresh = await restarted.BeginUploadAsync("peer", request, CancellationToken.None);
+        Assert.AreEqual(0L, fresh.Offset);
+        await restarted.ReceiveUploadAsync("peer", id, QuickSendAdapter.Pack(id, 0, bytes), CancellationToken.None);
+        await restarted.ReceiveUploadAsync("peer", id, null, CancellationToken.None);
+        Assert.AreEqual("user edit", await File.ReadAllTextAsync(Path.Combine(node.Root, "copy.bin")));
+        Assert.IsTrue(Directory.GetFiles(node.Root).Any(file => File.ReadAllBytes(file).SequenceEqual(bytes)));
     }
     [TestMethod]
     public async Task QuickSendDownloadUploadAndCollisionPreserveBytes()

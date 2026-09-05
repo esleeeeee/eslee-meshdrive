@@ -19,9 +19,35 @@
             <Setter Property="FontFamily" Value="Segoe UI" />
             <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
         </Style>
-        <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+        <Style TargetType="TextBox"><Setter Property="Background" Value="{StaticResource PanelBrush}"/><Setter Property="Foreground" Value="{StaticResource TextBrush}"/><Setter Property="CaretBrush" Value="{StaticResource AccentBrush}"/><Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/><Setter Property="Padding" Value="8,6"/></Style>
+        <Style TargetType="CheckBox"><Setter Property="Foreground" Value="{StaticResource TextBrush}"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
+        <Style TargetType="ListBox"><Setter Property="Background" Value="{StaticResource PanelBrush}"/><Setter Property="Foreground" Value="{StaticResource TextBrush}"/><Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/></Style>
+        <Style TargetType="ListBoxItem"><Setter Property="Foreground" Value="{StaticResource TextBrush}"/><Setter Property="Padding" Value="8,6"/></Style>
+        <Style TargetType="TreeView"><Setter Property="Background" Value="{StaticResource PanelBrush}"/><Setter Property="Foreground" Value="{StaticResource TextBrush}"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Padding" Value="8"/></Style>
+        <Style TargetType="TreeViewItem"><Setter Property="Foreground" Value="{StaticResource TextBrush}"/><Setter Property="Padding" Value="4,6"/></Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/><Setter Property="Background" Value="{StaticResource PanelBrush}"/><Setter Property="Padding" Value="8,6"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
+                <Grid MinHeight="34">
+                    <ToggleButton Focusable="False" IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                        <ToggleButton.Template><ControlTemplate TargetType="ToggleButton"><Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="4"><TextBlock Text="▾" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="8"/></Border></ControlTemplate></ToggleButton.Template>
+                    </ToggleButton>
+                    <ContentPresenter Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" Margin="8,6,28,6" IsHitTestVisible="False" VerticalAlignment="Center"/>
+                    <Popup x:Name="PART_Popup" IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom" AllowsTransparency="True" Focusable="False">
+                        <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"><ScrollViewer MaxHeight="300"><ItemsPresenter/></ScrollViewer></Border>
+                    </Popup>
+                </Grid>
+            </ControlTemplate></Setter.Value></Setter>
         </Style>
+        <Style TargetType="ComboBoxItem"><Setter Property="Foreground" Value="{StaticResource TextBrush}"/><Setter Property="Background" Value="{StaticResource PanelBrush}"/><Setter Property="Padding" Value="8,6"/><Style.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter Property="Background" Value="#34556F"/></Trigger></Style.Triggers></Style>
+        <Style TargetType="TabControl"><Setter Property="Background" Value="{StaticResource PanelBrush}"/><Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/><Setter Property="Foreground" Value="{StaticResource TextBrush}"/></Style>
+        <Style TargetType="TabItem">
+            <Setter Property="Background" Value="{StaticResource PanelBrush}"/><Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem"><Border Background="{TemplateBinding Background}" Padding="16,10" CornerRadius="5,5,0,0"><ContentPresenter ContentSource="Header"/></Border></ControlTemplate></Setter.Value></Setter>
+            <Style.Triggers><Trigger Property="IsSelected" Value="True"><Setter Property="Background" Value="{StaticResource CardBrush}"/><Setter Property="Foreground" Value="{StaticResource TextBrush}"/></Trigger></Style.Triggers>
+        </Style>
+        <Style TargetType="Expander"><Setter Property="Foreground" Value="{StaticResource TextBrush}"/></Style>
+        <Style TargetType="ContextMenu"><Setter Property="Background" Value="{StaticResource PanelBrush}"/><Setter Property="Foreground" Value="{StaticResource TextBrush}"/></Style>
         <Style TargetType="Button">
             <Setter Property="Background" Value="{StaticResource CardBrush}" />
             <Setter Property="Foreground" Value="{StaticResource TextBrush}" />

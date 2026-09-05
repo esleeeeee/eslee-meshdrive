@@ -15,6 +15,9 @@ public sealed class MdnsDiscoveryHost : IDisposable
     private ServiceProfile? _profile;
     private Timer? _expiryTimer;
     private bool _disposed;
+    private readonly object _gate = new();
+    private readonly Timer _recoveryTimer;
+    private string _addressSignature = "";
 
     public MdnsDiscoveryHost(DeviceIdentity identity, PeerDirectory directory, int? port = null)
     {
@@ -23,11 +26,17 @@ public sealed class MdnsDiscoveryHost : IDisposable
         _identity = identity;
         _directory = directory;
         _port = port ?? DiscoveryNames.DefaultPort;
+        _recoveryTimer = new Timer(RecoverNetwork, null, DiscoveryNames.QueryInterval, DiscoveryNames.QueryInterval);
     }
 
     public bool IsRunning { get; private set; }
 
     public bool TryStart()
+    {
+        lock (_gate) return TryStartLocked();
+    }
+
+    private bool TryStartLocked()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (IsRunning)
@@ -39,6 +48,7 @@ public sealed class MdnsDiscoveryHost : IDisposable
         {
             var selected = LanInterfaceSelector.Filter(MulticastService.GetNetworkInterfaces()).ToArray();
             var addresses = LanInterfaceSelector.Ipv4Addresses(selected);
+            _addressSignature = string.Join('|', addresses.OrderBy(a => a.ToString(), StringComparer.Ordinal));
             if (selected.Length == 0 || addresses.Length == 0)
             {
                 return false;
@@ -73,13 +83,29 @@ public sealed class MdnsDiscoveryHost : IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
+        lock (_gate)
         {
-            return;
+            if (_disposed) return;
+            _disposed = true;
+            _recoveryTimer.Dispose();
+            Cleanup();
         }
+    }
 
-        _disposed = true;
-        Cleanup();
+    private void RecoverNetwork(object? state)
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            try
+            {
+                var addresses = LanInterfaceSelector.Ipv4Addresses(LanInterfaceSelector.Filter(MulticastService.GetNetworkInterfaces()).ToArray());
+                var signature = string.Join('|', addresses.OrderBy(a => a.ToString(), StringComparer.Ordinal));
+                if (IsRunning && signature == _addressSignature) return;
+                Cleanup(); TryStartLocked();
+            }
+            catch (Exception exception) when (exception is IOException or SocketException or System.Net.NetworkInformation.NetworkInformationException or InvalidOperationException) { }
+        }
     }
 
     private void OnAnswerReceived(object? sender, MessageEventArgs e)

@@ -53,7 +53,7 @@ public sealed class FileTransferService(RemoteStorageClient remote, StorageServi
                 }
                 finally { _gate.Release(); }
             }
-            catch (Exception e) when (e is IOException or HttpRequestException or UnauthorizedAccessException or OperationCanceledException or ArgumentException)
+            catch (Exception e) when (e is IOException or HttpRequestException or UnauthorizedAccessException or OperationCanceledException or ArgumentException or JsonException or FormatException)
             { _progress[id] = _progress[id] with { State = "중단 · 같은 작업으로 재개 가능", Error = e.Message }; }
         });
         return id;
@@ -116,6 +116,11 @@ public sealed class FileTransferService(RemoteStorageClient remote, StorageServi
     private async Task<TransferFileRecord> RecordAsync(Guid id, string desired, TransferManifest manifest, CancellationToken token)
     {
         var previous = await _store.FindFileAsync(id, token).ConfigureAwait(false);
+        if (previous is { State: TransferState.Completed } && File.Exists(previous.FinalPath))
+        {
+            try { await QuickSendAdapter.VerifyStoredFileAsync(previous.FinalPath!, manifest, token).ConfigureAwait(false); }
+            catch (IOException) { previous = null; } // Preserve the changed file; a fresh copy receives a non-conflicting name.
+        }
         if (previous is not null && (previous.State != TransferState.Completed || File.Exists(previous.FinalPath)))
         {
             var verified = await QuickSendAdapter.VerifyResumeAsync(previous, token).ConfigureAwait(false);
@@ -157,7 +162,11 @@ public sealed class FileTransferService(RemoteStorageClient remote, StorageServi
             var parent = storage.Resolve(deviceId, envelope.Request.ShareId, envelope.Request.Path, SharePermissions.Upload);
             var record = await _store.FindFileAsync(id, token).ConfigureAwait(false) ?? throw new IOException("업로드 기록이 없습니다.");
             if (!string.Equals(Path.GetDirectoryName(record.FinalPath), parent, StringComparison.OrdinalIgnoreCase)) throw new UnauthorizedAccessException("공유 폴더가 변경되었습니다.");
-            if (record.State == TransferState.Completed) return;
+            if (record.State == TransferState.Completed)
+            {
+                await QuickSendAdapter.VerifyStoredFileAsync(record.FinalPath!, envelope.Request.Manifest, token).ConfigureAwait(false);
+                return;
+            }
             await using var receiver = new ReceiverSession(record, _store, new CheckpointPolicy(QuickSendAdapter.ChunkSize));
             await receiver.InitializeAsync(token).ConfigureAwait(false);
             if (payload is not null)

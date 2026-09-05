@@ -2,8 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="eslee MeshDrive"
-        Width="720" Height="820"
-        MinWidth="640" MinHeight="700"
+        Width="900" Height="800"
+        MinWidth="800" MinHeight="700"
         WindowStartupLocation="CenterScreen">
     <Grid Margin="28,24,28,24">
         <Grid.RowDefinitions>
@@ -32,7 +32,8 @@
             </StackPanel>
         </Border>
 
-        <Border Grid.Row="2" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}"
+        <Expander Grid.Row="2" Header="연결 진단 (고급)" Margin="0,14,0,0">
+        <Border Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="1" CornerRadius="10" Padding="18" Margin="0,14,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -73,6 +74,7 @@
             </Grid>
         </Border>
 
+        </Expander>
         <Border Grid.Row="3" Background="{StaticResource CardBrush}" BorderBrush="{StaticResource BorderBrush}"
                 BorderThickness="1" CornerRadius="10" Padding="18" Margin="0,14,0,0">
             <Grid>
@@ -115,7 +117,6 @@
                                 <GridViewColumn Header="이름" Width="180" DisplayMemberBinding="{Binding Name}" />
                                 <GridViewColumn Header="상태" Width="80" DisplayMemberBinding="{Binding Status}" />
                                 <GridViewColumn Header="신뢰" Width="90" DisplayMemberBinding="{Binding Trust}" />
-                                <GridViewColumn Header="IPv4" Width="140" DisplayMemberBinding="{Binding Ipv4}" />
                             </GridView>
                         </ListView.View>
                     </ListView>
@@ -145,7 +146,6 @@
                     <ListView.View>
                         <GridView>
                             <GridViewColumn Header="이름" Width="220" DisplayMemberBinding="{Binding Name}" />
-                            <GridViewColumn Header="Device ID" Width="220" DisplayMemberBinding="{Binding DeviceId}" />
                         </GridView>
                     </ListView.View>
                 </ListView>
@@ -155,7 +155,7 @@
         <TextBlock x:Name="MessageText" Grid.Row="5" Style="{StaticResource MutedText}" Margin="0,16,0,0"
                    Text="창을 닫아도 Agent는 계속 실행됩니다. 다시 실행하면 같은 Agent에 재연결합니다." />
 
-        <DockPanel Grid.Row="6" Margin="0,18,0,0">
+        <WrapPanel Grid.Row="6" Margin="0,18,0,0">
             <Button Content="파일과 공유 폴더" Click="OpenStorage_Click" DockPanel.Dock="Left" />
             <Button x:Name="RefreshButton" Content="상태 새로고침" Click="Refresh_Click"
                     DockPanel.Dock="Left" HorizontalAlignment="Left" />
@@ -164,6 +164,6 @@
                 <Button x:Name="ExitAllButton" Content="MeshDrive 종료" Style="{StaticResource DangerButton}"
                         Click="ExitAll_Click" />
             </StackPanel>
-        </DockPanel>
+        </WrapPanel>
     </Grid>
 </Window>

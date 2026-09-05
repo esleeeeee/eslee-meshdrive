@@ -17,6 +17,9 @@ public partial class StorageWindow : Window
     private GridView? _detailsView;
     private int _navigation;
     private readonly List<(string DeviceId, string JobId)> _directCopies = [];
+    private readonly Stack<string> _history = new();
+    private bool _selectingTree;
+    private sealed record TreeShare(IpcTrustedPeer Device, RemoteShare Share, List<RemoteShare> Shares);
     public StorageWindow()
     {
         InitializeComponent();
@@ -24,16 +27,63 @@ public partial class StorageWindow : Window
         Loaded += async (_, _) => await RunAsync(async () =>
         {
             _client = await AgentIpcClient.ConnectAsync(IpcNames.DefaultPipeName, TimeSpan.FromSeconds(5), _lifetime.Token);
-            Devices.ItemsSource = (await _client.GetTrustedAsync(_lifetime.Token)).Trusted;
+            await RefreshDevicesAsync();
             LocalShares.ItemsSource = (await SendAsync(new())).LocalShares;
             var settings = System.Text.Json.Nodes.JsonNode.Parse((await SendAsync(new() { Action = "settings" })).Value!);
             NameSetting.Text = settings?["DeviceName"]?.GetValue<string>() ?? Environment.MachineName;
             AutoStart.IsChecked = settings?["OnboardingComplete"]?.GetValue<bool>() != true || settings?["AutoStart"]?.GetValue<bool>() == true;
+            if (settings?["OnboardingComplete"]?.GetValue<bool>() != true) Sections.SelectedIndex = 1;
         });
         Closed += async (_, _) => { await _lifetime.CancelAsync(); if (_client is not null) await _client.DisposeAsync(); _lifetime.Dispose(); };
     }
     private Task<StorageReply> SendAsync(StorageCommand command) => (_client ?? throw new IOException("Agent 연결을 기다리세요.")).StorageAsync(command, _lifetime.Token);
     private void Sync_Click(object sender, RoutedEventArgs e) => new SyncWindow { Owner = this }.Show();
+    private void ManageDevices_Click(object sender, RoutedEventArgs e) { Owner?.Activate(); Close(); }
+    private async void ReloadDevices_Click(object sender, RoutedEventArgs e) => await RunAsync(RefreshDevicesAsync);
+    private async Task RefreshDevicesAsync()
+    {
+        if (_client is null) return;
+        var devices = (await _client.GetTrustedAsync(_lifetime.Token)).Trusted ?? [];
+        var peers = await _client.GetPeersAsync(_lifetime.Token);
+        Devices.ItemsSource = devices; DeviceTree.Items.Clear();
+        DeviceTree.Items.Add(new TreeViewItem { Header = "내 기기 · 공유 폴더", Tag = "local" });
+        foreach (var device in devices)
+        {
+            var online = peers.Any(p => p.DeviceId == device.DeviceId && p.IsOnline);
+            var node = new TreeViewItem { Header = $"{device.Name} · {(online ? "온라인" : "발견 대기")}", Tag = device };
+            node.Items.Add("공유 불러오기");
+            node.Expanded += async (_, e) =>
+            {
+                if (e.Source != node || node.Items.Count != 1 || node.Items[0] is not string) return;
+                await RunAsync(async () =>
+                {
+                    var shares = (await SendAsync(new() { Action = "remote-shares", DeviceId = device.DeviceId })).Shares ?? [];
+                    node.Items.Clear();
+                    foreach (var share in shares) node.Items.Add(new TreeViewItem { Header = share.Name, Tag = new TreeShare(device, share, shares) });
+                });
+            };
+            DeviceTree.Items.Add(node);
+        }
+    }
+    private void TreeSelected(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        if (e.NewValue is not TreeViewItem node) return;
+        if (node.Tag is string) { Sections.SelectedIndex = 2; return; }
+        _selectingTree = true;
+        try
+        {
+            if (node.Tag is TreeShare selected)
+            {
+                Devices.SelectedItem = selected.Device; RemoteShares.ItemsSource = selected.Shares; RemoteShares.SelectedItem = selected.Share;
+            }
+            else if (node.Tag is IpcTrustedPeer device)
+            {
+                ++_navigation; Devices.SelectedItem = device; RemoteShares.ItemsSource = null; Entries.ItemsSource = null; _path = ""; _history.Clear();
+                Location.Text = $"{device.Name} · 왼쪽에서 공유 폴더를 선택하세요."; node.IsExpanded = true;
+            }
+        }
+        finally { _selectingTree = false; }
+    }
     private async Task RunAsync(Func<Task> action)
     {
         try { await action(); Feedback.Text = "완료"; }
@@ -42,11 +92,15 @@ public partial class StorageWindow : Window
     }
     private async void DeviceChanged(object sender, SelectionChangedEventArgs e) => await RunAsync(async () =>
     {
-        Entries.ItemsSource = null; _path = "";
+        if (_selectingTree) return;
+        var generation = ++_navigation; Entries.ItemsSource = null; _path = ""; _history.Clear();
         if (Devices.SelectedItem is IpcTrustedPeer device)
-            RemoteShares.ItemsSource = (await SendAsync(new() { Action = "remote-shares", DeviceId = device.DeviceId })).Shares;
+        {
+            var shares = (await SendAsync(new() { Action = "remote-shares", DeviceId = device.DeviceId })).Shares;
+            if (generation == _navigation) RemoteShares.ItemsSource = shares;
+        }
     });
-    private async void ShareChanged(object sender, SelectionChangedEventArgs e) { _path = ""; await RunAsync(LoadEntriesAsync); }
+    private async void ShareChanged(object sender, SelectionChangedEventArgs e) { ++_navigation; _path = ""; _history.Clear(); await RunAsync(LoadEntriesAsync); }
     private async Task LoadEntriesAsync()
     {
         if (Devices.SelectedItem is not IpcTrustedPeer device || RemoteShares.SelectedItem is not RemoteShare share) return;
@@ -69,7 +123,7 @@ public partial class StorageWindow : Window
     }
     private async void EntryDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (Entries.SelectedItem is FileRow { IsDirectory: true } entry) { _path = entry.RelativePath; await RunAsync(LoadEntriesAsync); }
+        if (Entries.SelectedItem is FileRow { IsDirectory: true } entry) { _history.Push(_path); _path = entry.RelativePath; await RunAsync(LoadEntriesAsync); }
         else await RunAsync(() => OpenFileAsync(false));
     }
     private async void OpenFile_Click(object sender, RoutedEventArgs e) => await RunAsync(() => OpenFileAsync(false));
@@ -130,6 +184,14 @@ public partial class StorageWindow : Window
         if (MeshDrive.Agent.PhotoCache.IsImage(entry.Name))
         {
             var photo = await SendAsync(new() { Action = "open-photo", DeviceId = device.DeviceId, ShareId = share.Id, Path = entry.RelativePath });
+            if (choosePlayer)
+            {
+                var dialog = new OpenFileDialog { Filter = "프로그램 (*.exe)|*.exe", Title = "사진을 열 프로그램 선택" };
+                if (dialog.ShowDialog(this) != true) return;
+                var photoStart = new System.Diagnostics.ProcessStartInfo(dialog.FileName) { UseShellExecute = false };
+                photoStart.ArgumentList.Add(photo.Value!);
+                System.Diagnostics.Process.Start(photoStart)?.Dispose(); return;
+            }
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(photo.Value!) { UseShellExecute = true })?.Dispose(); return;
         }
         var music = PlayerPreferences.IsMusic(entry.Name);
@@ -153,7 +215,8 @@ public partial class StorageWindow : Window
         }
         else { Entries.ItemTemplate = null; Entries.ClearValue(ItemsControl.ItemsPanelProperty); Entries.View = _detailsView; }
     }
-    private async void Parent_Click(object sender, RoutedEventArgs e) { var index = _path.LastIndexOf('/'); _path = index < 0 ? "" : _path[..index]; await RunAsync(LoadEntriesAsync); }
+    private async void Back_Click(object sender, RoutedEventArgs e) { if (_history.TryPop(out var previous)) { _path = previous; await RunAsync(LoadEntriesAsync); } }
+    private async void Parent_Click(object sender, RoutedEventArgs e) { if (_path.Length == 0) return; _history.Push(_path); var index = _path.LastIndexOf('/'); _path = index < 0 ? "" : _path[..index]; await RunAsync(LoadEntriesAsync); }
     private async void Reload_Click(object sender, RoutedEventArgs e) => await RunAsync(LoadEntriesAsync);
     private void ChooseFolder_Click(object sender, RoutedEventArgs e)
     {
@@ -170,6 +233,13 @@ public partial class StorageWindow : Window
     {
         if (LocalShares.SelectedItem is SharedFolder share) LocalShares.ItemsSource = (await SendAsync(new() { Action = "remove-share", ShareId = share.Id })).LocalShares;
     });
+    private async void Permissions_Click(object sender, RoutedEventArgs e) => await RunAsync(async () =>
+    {
+        if (LocalShares.SelectedItem is not SharedFolder share) return;
+        var dialog = new SharePermissionsWindow(share, Devices.Items.Cast<IpcTrustedPeer>()) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        LocalShares.ItemsSource = (await SendAsync(new() { Action = "save-share", ShareId = share.Id, Name = share.Name, Path = share.LocalPath, Permissions = share.Permissions, DeviceOverrides = dialog.Overrides })).LocalShares;
+    });
     private void LocalShareChanged(object sender, SelectionChangedEventArgs e)
     {
         if (LocalShares.SelectedItem is not SharedFolder share) return;
@@ -180,6 +250,7 @@ public partial class StorageWindow : Window
 
 public sealed class FileRow(RemoteEntry entry) : System.ComponentModel.INotifyPropertyChanged
 {
+    public string Icon => entry.IsDirectory ? "📁" : "📄";
     public string Name => entry.Name;
     public string RelativePath => entry.RelativePath;
     public bool IsDirectory => entry.IsDirectory;

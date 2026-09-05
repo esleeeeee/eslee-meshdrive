@@ -4,16 +4,24 @@
     <RootNamespace>MeshDrive.Tests</RootNamespace>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="MSTest" Version="4.0.2" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
+    <Using Include="System.IO" />
+    <Using Include="System.Net.Http" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\MeshDrive.Core\MeshDrive.Core.csproj" />
     <ProjectReference Include="..\..\src\MeshDrive.Protocol\MeshDrive.Protocol.csproj" />
     <ProjectReference Include="..\..\src\MeshDrive.Agent\MeshDrive.Agent.csproj" />
+    <ProjectReference Include="..\..\src\MeshDrive.Windows\MeshDrive.Windows.csproj" />
   </ItemGroup>
+  <Target Name="CopyStandaloneAgentDependencies" AfterTargets="Build">
+    <ItemGroup><_StandaloneAgent Include="$(MSBuildThisFileDirectory)..\..\src\MeshDrive.Agent\bin\$(Configuration)\$(TargetFramework)\*.*" /></ItemGroup>
+    <Copy SourceFiles="@(_StandaloneAgent)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+  </Target>
 </Project>
