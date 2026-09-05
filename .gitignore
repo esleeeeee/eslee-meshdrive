@@ -10,3 +10,9 @@ artifacts/
 *.log
 *.dmp
 *.local.json
+android/.gradle/
+android/.kotlin/
+android/**/build/
+android/local.properties
+*.keystore
+*.jks
