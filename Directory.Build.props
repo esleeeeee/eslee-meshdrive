@@ -6,9 +6,9 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
-    <Version>0.0.3</Version>
-    <FileVersion>0.0.3.0</FileVersion>
-    <InformationalVersion>0.0.3</InformationalVersion>
+    <Version>0.1.0</Version>
+    <FileVersion>0.1.0.0</FileVersion>
+    <InformationalVersion>0.1.0</InformationalVersion>
     <Company>eslee</Company>
     <Product>eslee MeshDrive</Product>
     <Authors>eslee</Authors>
