@@ -22,6 +22,7 @@ class MainActivity:Activity(){
     private data class UploadTarget(val peer:MeshEngine.Peer,val share:String,val path:String)
     private var uploadTarget:UploadTarget?=null
     private var navigation=0
+    private val directJobs=mutableListOf<Pair<MeshEngine.Peer,String>>()
     private val refresh=object:Runnable{override fun run(){val p=MeshService.engine?.pairing;if(p!=null&&displayedSession!=p.offer.optString("sessionId")&&System.currentTimeMillis()<p.expires){displayedSession=p.offer.optString("sessionId");AlertDialog.Builder(this@MainActivity).setTitle("${p.peer.name} · ${p.sas}").setMessage("상대 기기에도 같은 6자리 번호가 보이면 승인하세요.").setPositiveButton("승인"){_,_->runWork{engine().decide(true)}}.setNegativeButton("거절"){_,_->runWork{engine().decide(false)}}.show()};handler.postDelayed(this,1500)}}
     override fun onCreate(savedInstanceState:Bundle?){super.onCreate(savedInstanceState);if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),1);startForegroundService(Intent(this,MeshService::class.java));val scroll=ScrollView(this);body=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(24,36,24,24)};scroll.addView(body);setContentView(scroll);message=TextView(this);home();handler.post(refresh)}
     private fun engine()=MeshService.engine?:throw IllegalStateException("Agent 준비 중입니다. 잠시 후 새로고침하세요.")
@@ -85,7 +86,43 @@ class MainActivity:Activity(){
             runOnUiThread{if(selected==target.peer&&share==target.share&&path==target.path)browse()}
         }
     }
-    private fun chooseFile(peer:MeshEngine.Peer,id:String,file:JSONObject){AlertDialog.Builder(this).setTitle(file.getString("name")).setItems(arrayOf("원본 열기","이 기기로 가져오기")){_,which->runWork{val path=file.getString("relativePath");val image=file.getString("name").substringAfterLast('.').lowercase() in listOf("jpg","jpeg","png","webp","gif","bmp");if(which==1){val saved=AndroidTransfers.download(engine(),peer,id,path,File(filesDir,"downloads"));runOnUiThread{openLocal(saved)}}else if(image){val saved=cachePhoto(peer,id,path);runOnUiThread{openLocal(saved)}}else{val url=engine().stream(peer,id,path);val type=if(path.substringAfterLast('.').lowercase() in listOf("mp3","flac","wav","m4a","ogg","opus"))"audio/*" else "video/*";runOnUiThread{try{startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(url),type),"재생할 앱 선택"))}catch(e:Exception){message.text="URL 재생을 지원하는 플레이어 앱을 설치하세요"}}}}}.show()}
+    private fun chooseFile(peer:MeshEngine.Peer,id:String,file:JSONObject){
+        AlertDialog.Builder(this).setTitle(file.getString("name")).setItems(arrayOf("원본 열기","이 기기로 가져오기","다른 기기로 직접 복사","직접 복사 상태")){_,which->
+            if(which==2){chooseCopyTarget(peer,id,file);return@setItems}
+            if(which==3){runWork{val state=directJobs.toList().map{(p,job)->engine().objectRequest(p,"/v1/secure/storage/copy-progress?id=$job")}.joinToString("\n"){"${it.optString("name")} · ${it.optString("state")}"};runOnUiThread{AlertDialog.Builder(this).setTitle("직접 복사 상태").setMessage(state.ifEmpty{"아직 지시한 전송이 없습니다"}).setPositiveButton("확인",null).show()}};return@setItems}
+            runWork {
+                val path=file.getString("relativePath")
+                val image=file.getString("name").substringAfterLast('.').lowercase() in listOf("jpg","jpeg","png","webp","gif","bmp")
+                if(which==1){val saved=AndroidTransfers.download(engine(),peer,id,path,File(filesDir,"downloads"));runOnUiThread{openLocal(saved)}}
+                else if(image){val saved=cachePhoto(peer,id,path);runOnUiThread{openLocal(saved)}}
+                else {
+                    val url=engine().stream(peer,id,path)
+                    val type=if(path.substringAfterLast('.').lowercase() in listOf("mp3","flac","wav","m4a","ogg","opus"))"audio/*" else "video/*"
+                    runOnUiThread{try{startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(url),type),"재생할 앱 선택"))}catch(e:Exception){message.text="URL 재생을 지원하는 플레이어 앱을 설치하세요"}}
+                }
+            }
+        }.show()
+    }
+    private fun chooseCopyTarget(source:MeshEngine.Peer,share:String,file:JSONObject){
+        val candidates=engine().peers.values.filter{it.id!=source.id&&engine().trusted(it.id)}.sortedBy{it.name}
+        if(candidates.isEmpty()){message.text="다른 받을 기기를 먼저 페어링하세요";return}
+        AlertDialog.Builder(this).setTitle("받을 기기 · 세 기기 모두 서로 페어링 필요").setItems(candidates.map{it.name}.toTypedArray()){_,index->
+            val target=candidates[index]
+            runWork {
+                val shares=engine().json(target,"/v1/secure/storage/shares")
+                val writable=(0 until shares.length()).map{shares.getJSONObject(it)}.filter{it.getInt("permissions") and 8 != 0}
+                runOnUiThread {
+                    AlertDialog.Builder(this).setTitle("복사할 공유 폴더").setItems(writable.map{it.getString("name")}.toTypedArray()){_,selected->
+                        runWork {
+                            val ticket=engine().objectRequest(source,"/v1/secure/storage/copy-authorize",JSONObject().put("targetDeviceId",target.id).put("shareId",share).put("path",file.getString("relativePath")))
+                            val job=engine().objectRequest(target,"/v1/secure/storage/copy-receive",JSONObject().put("sourceDeviceId",source.id).put("token",ticket.getString("token")).put("shareId",writable[selected].getString("id")).put("path",""))
+                            runOnUiThread{directJobs.add(target to job.getString("id"))}
+                        }
+                    }.setNegativeButton("취소",null).show()
+                }
+            }
+        }.setNegativeButton("취소",null).show()
+    }
     private fun cachePhoto(peer:MeshEngine.Peer,id:String,path:String):File {val resource=engine().resource("content",id,path);val c=engine().connection(peer,resource);require(c.responseCode==200);require(c.contentLengthLong in 0..(256L*1024*1024));val dir=File(cacheDir,"photos").apply{mkdirs()};val key=java.security.MessageDigest.getInstance("SHA-256").digest((peer.id+resource+c.getHeaderField("ETag")+c.lastModified+c.contentLengthLong).toByteArray()).joinToString(""){"%02x".format(it)};val target=File(dir,key+"."+path.substringAfterLast('.'));try{if(!target.exists()){val temp=File(dir,"$key.tmp");c.inputStream.use{input->temp.outputStream().use{out->var total=0L;val buffer=ByteArray(65536);while(true){val n=input.read(buffer);if(n<0)break;total+=n;require(total<=256L*1024*1024);out.write(buffer,0,n)};require(total==c.contentLengthLong)}};check(temp.renameTo(target))};target.setLastModified(System.currentTimeMillis());var size=dir.listFiles().orEmpty().sumOf{it.length()};dir.listFiles().orEmpty().sortedBy{it.lastModified()}.forEach{if(size>1024L*1024*1024&&it!=target){val n=it.length();if(it.delete())size-=n}};return target}finally{c.disconnect()}}
     private fun openLocal(file:File){try{val uri=FileProvider.getUriForFile(this,"com.eslee.meshdrive.files",file);val mime=android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.extension.lowercase())?:"application/octet-stream";startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri,mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),"열 앱 선택"))}catch(e:Exception){message.text="파일 저장 완료: ${file.name}. 열 수 있는 앱이 없습니다."}}
     @android.annotation.SuppressLint("WrongConstant") // Persist only the URI grants actually returned by the document picker.

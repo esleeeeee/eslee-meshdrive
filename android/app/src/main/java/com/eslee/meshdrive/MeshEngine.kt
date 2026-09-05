@@ -30,6 +30,7 @@ class MeshEngine(val context: Context): AutoCloseable {
     private val bridge = HttpServer(ServerSocket(0,16,InetAddress.getByName("127.0.0.1")), ::relay)
     private val streams = ConcurrentHashMap<String, Triple<String,String,Long>>()
     private val storageApi = StorageApi(context, ::document)
+    private val directCopies = DirectCopies(this)
     @Volatile var pairing: PairSession? = null
     @Volatile var status = "준비 중"
     @Volatile var paused = false
@@ -57,6 +58,8 @@ class MeshEngine(val context: Context): AutoCloseable {
         return (URL("https://${endpoint.address}:${endpoint.port}$path").openConnection() as HttpsURLConnection).apply { sslSocketFactory=security.context(fp).socketFactory;hostnameVerifier=HostnameVerifier{_,_->true};instanceFollowRedirects=false;connectTimeout=8000;readTimeout=30000;requestMethod=method;if(body!=null){doOutput=true;setFixedLengthStreamingMode(body.size);setRequestProperty("Content-Type","application/json");outputStream.use{it.write(body)}} }
     }
     fun json(peer:Peer,path:String):JSONArray {val c=connection(peer,path);return try{require(c.responseCode==200){"접근 실패 (${c.responseCode})"};c.inputStream.use{JSONArray(it.readBytes().toString(Charsets.UTF_8))}}finally{c.disconnect()}}
+    fun objectRequest(peer:Peer,path:String,body:JSONObject?=null):JSONObject {val c=connection(peer,path,if(body==null)"GET" else "POST",body?.toString()?.toByteArray());return try{require(c.responseCode in 200..299){"요청 실패 (${c.responseCode})"};c.inputStream.use{JSONObject(it.readBytes().toString(Charsets.UTF_8))}}finally{c.disconnect()}}
+    fun access(device:String,share:String,path:String,permission:Int):DocumentFile {if(!trusted(device))throw SecurityException("먼저 페어링하세요");return document(share,path,permission)}
     fun resource(kind:String,share:String,path:String)="/v1/secure/storage/$kind?shareId=${URLEncoder.encode(share,"UTF-8")}&path=${URLEncoder.encode(path,"UTF-8")}"
     fun stream(peer:Peer,share:String,path:String):String {val token=random();streams.entries.removeIf{System.currentTimeMillis()-it.value.third>900000};require(streams.size<64);streams[token]=Triple(peer.id,resource("content",share,path),System.currentTimeMillis());return "http://127.0.0.1:${bridge.port}/stream/$token/${URLEncoder.encode(path.substringAfterLast('/'),"UTF-8")}"}
     private fun relay(r:HttpRequest):HttpReply {val token=r.path.split('/').getOrNull(2)?:return HttpReply.text("",410);val s=streams[token]?:return HttpReply.text("",410);if(System.currentTimeMillis()-s.third>900000){streams.remove(token);return HttpReply.text("",410)};streams[token]=s.copy(third=System.currentTimeMillis());val peer=peers[s.first]?:return HttpReply.text("",404);val c=connection(peer,s.second,r.method);r.headers["range"]?.let{c.setRequestProperty("Range",it)};val code=c.responseCode;val headers=mutableMapOf<String,String>();listOf("Content-Range","Accept-Ranges","ETag","Last-Modified").forEach{k->c.getHeaderField(k)?.let{headers[k]=it}};val input=if(code in 200..299)c.inputStream else c.errorStream;return HttpReply(code,c.contentType?:"application/octet-stream",maxOf(0,c.contentLengthLong),input?.let{object:FilterInputStream(it){override fun close(){super.close();c.disconnect()};override fun read(b:ByteArray,o:Int,l:Int):Int{streams[token]=s.copy(third=System.currentTimeMillis());return super.read(b,o,l)}}},headers)}
@@ -67,7 +70,7 @@ class MeshEngine(val context: Context): AutoCloseable {
     @Synchronized private fun document(share:String,path:String,permission:Int):DocumentFile {if(paused)throw SecurityException();val s=(0 until shares.length()).map{shares.getJSONObject(it)}.first{it.getString("id")==share};if(s.getInt("permissions") and permission != permission)throw SecurityException();var doc=DocumentFile.fromTreeUri(context,Uri.parse(s.getString("uri")))?:throw IOException();for(part in PairingProtocol.safeParts(path)){if(part.startsWith('.'))throw SecurityException();doc=doc.findFile(part)?:throw FileNotFoundException()};return doc}
     private fun serve(r:HttpRequest):HttpReply {
         val cert=r.peer?:throw SecurityException();val fp=DeviceSecurity.fingerprint(cert)
-        val expectedMethod=when(r.path){"/v1/pairing/offer","/v1/pairing/decision","/v1/secure/storage/upload-start","/v1/secure/storage/upload-complete"->"POST";"/v1/secure/storage/upload-chunk"->"PUT";else->"GET"}
+        val expectedMethod=when(r.path){"/v1/pairing/offer","/v1/pairing/decision","/v1/secure/storage/upload-start","/v1/secure/storage/upload-complete","/v1/secure/storage/copy-authorize","/v1/secure/storage/copy-receive"->"POST";"/v1/secure/storage/upload-chunk"->"PUT";else->"GET"}
         if(r.method!=expectedMethod&&!(r.method=="HEAD"&&expectedMethod=="GET"))return HttpReply.text("",405)
         if(r.path.startsWith("/v1/secure/")){synchronized(this){if((trust.keys().asSequence().map{trust.getString(it)}).none{it==fp})throw SecurityException()}}
         if(r.path=="/v1/pairing/offer"&&r.method=="POST") {val remote=JSONObject(r.body.toString(Charsets.UTF_8));validate(remote,cert);val now=System.currentTimeMillis();val expires=PairingProtocol.expires(Instant.parse(remote.getString("expiresAt")).toEpochMilli(),now);val peer=Peer(remote.getString("deviceId"),remote.getString("deviceName"),r.address,remote.getInt("listenPort"));synchronized(this){require(!trusted(peer.id));require(pairing?.let{!it.rejected&&now<it.expires&&!(it.localAccepted&&it.remoteAccepted)}!=true);val local=offer(remote.getString("sessionId"),expires);pairing=session(local,remote,peer);peers[peer.id]=peer;return HttpReply.text(local.toString())}}
@@ -76,6 +79,8 @@ class MeshEngine(val context: Context): AutoCloseable {
         if(r.path=="/v1/secure/storage/shares"){if(paused)throw SecurityException();val array=JSONArray();synchronized(this){for(i in 0 until shares.length()){val s=shares.getJSONObject(i);array.put(JSONObject().put("id",s.getString("id")).put("name",s.getString("name")).put("permissions",s.getInt("permissions")))}};return HttpReply.text(array.toString())}
         if(r.path.startsWith("/v1/secure/storage/")){
             val device=synchronized(this){trust.keys().asSequence().firstOrNull{trust.getString(it)==fp}}?:throw SecurityException()
+            directCopies.handle(r,device)?.let{return it}
+            r.query["copyToken"]?.let{directCopies.validate(it,device,r.query["shareId"],r.query["path"].orEmpty())}
             storageApi.upload(r,device)?.let{return it}
             storageApi.get(r)?.let{return it}
         }
@@ -85,5 +90,5 @@ class MeshEngine(val context: Context): AutoCloseable {
         return HttpReply.text("",404)
     }
     private fun random()=ByteArray(32).also{SecureRandom().nextBytes(it)}.joinToString(""){"%02X".format(it)}
-    override fun close(){try{nsd.stopServiceDiscovery(discovery);nsd.unregisterService(registration)}catch(_:Exception){};server.close();bridge.close()}
+    override fun close(){try{nsd.stopServiceDiscovery(discovery);nsd.unregisterService(registration)}catch(_:Exception){};directCopies.close();server.close();bridge.close()}
 }

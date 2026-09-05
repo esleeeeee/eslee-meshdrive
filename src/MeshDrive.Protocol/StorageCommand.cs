@@ -12,6 +12,10 @@ public sealed class StorageCommand
     public string? Destination { get; set; }
     public SharePermissions Permissions { get; set; } = SharePermissions.ReadOnly;
     public Dictionary<string, SharePermissions>? DeviceOverrides { get; set; }
+    public string? TargetDeviceId { get; set; }
+    public string? TargetShareId { get; set; }
+    public string? CopyToken { get; set; }
+    public string? RequesterId { get; set; }
 }
 
 public sealed class StorageReply

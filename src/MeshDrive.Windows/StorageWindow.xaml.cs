@@ -16,6 +16,7 @@ public partial class StorageWindow : Window
     private readonly CancellationTokenSource _lifetime = new();
     private GridView? _detailsView;
     private int _navigation;
+    private readonly List<(string DeviceId, string JobId)> _directCopies = [];
     public StorageWindow()
     {
         InitializeComponent();
@@ -87,9 +88,27 @@ public partial class StorageWindow : Window
     });
     private async void Transfers_Click(object sender, RoutedEventArgs e)
     {
-        try { var result = await SendAsync(new() { Action = "transfers" }); Feedback.Text = string.Join("\n", result.Transfers?.Select(t => $"{t.Name} · {t.State} · {t.CompletedBytes:N0}/{t.TotalBytes:N0} bytes · {t.Result ?? t.Error}") ?? []); }
+        try {
+            var result = await SendAsync(new() { Action = "transfers" });
+            var transfers = result.Transfers ?? [];
+            foreach (var copy in _directCopies)
+            {
+                try { transfers.AddRange((await SendAsync(new() { Action = "copy-progress", DeviceId = copy.DeviceId, Path = copy.JobId })).Transfers ?? []); }
+                catch (IOException) { transfers.Add(new(copy.JobId, "직접 복사", 0, 0, "대상 기기 상태 확인 불가", null, null)); }
+            }
+            Feedback.Text = string.Join("\n", transfers.Select(t => $"{t.Name} · {t.State} · {t.CompletedBytes:N0}/{t.TotalBytes:N0} bytes · {t.Result ?? t.Error}"));
+        }
         catch (IOException error) { Feedback.Text = error.Message; }
     }
+    private async void DirectCopy_Click(object sender, RoutedEventArgs e) => await RunAsync(async () =>
+    {
+        if (Entries.SelectedItem is not FileRow { IsDirectory: false } file || Devices.SelectedItem is not IpcTrustedPeer source || RemoteShares.SelectedItem is not RemoteShare share) return;
+        var dialog = new CopyTargetWindow(Devices.Items.Cast<IpcTrustedPeer>().Where(d => d.DeviceId != source.DeviceId), SendAsync) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.TargetDevice?.DeviceId is not { } targetId || dialog.TargetShare is not { } destination) return;
+        var result = await SendAsync(new() { Action = "copy-direct", DeviceId = source.DeviceId, ShareId = share.Id, Path = file.RelativePath,
+            TargetDeviceId = targetId, TargetShareId = destination.Id, Destination = dialog.TargetPath });
+        if (result.Value is not null) _directCopies.Add((targetId, result.Value));
+    });
     private async void SaveSettings_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => await SendAsync(new() { Action = "save-settings", Name = NameSetting.Text, Permissions = AutoStart.IsChecked == true ? SharePermissions.All : SharePermissions.None }));
     private async void Pause_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => await SendAsync(new() { Action = "pause" }));
     private async void Resume_Click(object sender, RoutedEventArgs e) => await RunAsync(async () => await SendAsync(new() { Action = "resume" }));

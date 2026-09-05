@@ -21,6 +21,7 @@ public sealed class AgentHttpsHost : IAsyncDisposable
     public StorageService? Storage { get; init; }
     public PhotoCache? Thumbnails { get; init; }
     public FileTransferService? Transfers { get; init; }
+    private CopyGrants? _copyGrants;
 
     public AgentHttpsHost(
         DeviceIdentity identity,
@@ -75,6 +76,8 @@ public sealed class AgentHttpsHost : IAsyncDisposable
             });
 
             var app = builder.Build();
+            if (Storage is not null) _copyGrants = new(Storage);
+            if (Transfers is not null) Transfers.IsRequesterTrusted = id => _coordinator.ListTrusted().Any(p => p.DeviceId == id);
             app.Use(ValidateClientCertificateAsync);
             app.Use(async (context, next) =>
             {
@@ -94,8 +97,20 @@ public sealed class AgentHttpsHost : IAsyncDisposable
                 Results.Json(RequireStorage().ListEntries(PeerId(c), shareId, path ?? "")));
             app.MapMethods("/v1/secure/storage/content", ["GET", "HEAD"], HandleContent);
             app.MapGet("/v1/secure/storage/manifest", async (HttpContext c, string shareId, string path) =>
-                Results.Json(await QuickSendAdapter.ManifestAsync(RequireStorage().Resolve(PeerId(c), shareId, path, SharePermissions.Download), c.RequestAborted).ConfigureAwait(false)));
+            {
+                if (c.Request.Query.TryGetValue("copyToken", out var token)) ValidateCopyGrant(c, token.ToString(), shareId, path);
+                return Results.Json(await QuickSendAdapter.ManifestAsync(RequireStorage().Resolve(PeerId(c), shareId, path, SharePermissions.Download), c.RequestAborted).ConfigureAwait(false));
+            });
             app.MapGet("/v1/secure/storage/chunk", ReadChunkAsync);
+            app.MapPost("/v1/secure/storage/copy-authorize", (HttpContext c, MeshDrive.Protocol.CopyGrantRequest request) =>
+            {
+                RequireTrusted(request.TargetDeviceId);
+                return Results.Json(RequireCopyGrants().Create(PeerId(c), request));
+            });
+            app.MapGet("/v1/secure/storage/copy-grant", (HttpContext c, string token) => Results.Json(ValidateCopyGrant(c, token)));
+            app.MapPost("/v1/secure/storage/copy-receive", async (HttpContext c, MeshDrive.Protocol.CopyReceiveRequest request) =>
+                Results.Json(await RequireTransfers().ReceiveCopyAsync(PeerId(c), request, c.RequestAborted).ConfigureAwait(false)));
+            app.MapGet("/v1/secure/storage/copy-progress", (HttpContext c, string id) => Results.Json(RequireTransfers().RemoteProgress(PeerId(c), id)));
             app.MapPost("/v1/secure/storage/upload-start", async (HttpContext c, MeshDrive.Protocol.UploadRequest request) =>
                 Results.Json(await RequireTransfers().BeginUploadAsync(PeerId(c), request, c.RequestAborted).ConfigureAwait(false)));
             app.MapPut("/v1/secure/storage/upload-chunk", async (HttpContext c, Guid id) =>
@@ -219,8 +234,20 @@ public sealed class AgentHttpsHost : IAsyncDisposable
 
     private StorageService RequireStorage() => Storage ?? throw new InvalidOperationException("공유 저장소가 준비되지 않았습니다.");
     private FileTransferService RequireTransfers() => Transfers ?? throw new IOException("전송 엔진이 준비되지 않았습니다.");
+    private CopyGrants RequireCopyGrants() => _copyGrants ?? throw new IOException("직접 복사가 준비되지 않았습니다.");
+    private void RequireTrusted(string id)
+    {
+        if (!_coordinator.ListTrusted().Any(p => p.DeviceId == id)) throw new UnauthorizedAccessException("복사 참여 기기 모두를 먼저 페어링하세요.");
+    }
+    private MeshDrive.Protocol.CopyGrant ValidateCopyGrant(HttpContext context, string token, string? shareId = null, string? path = null)
+    {
+        var grant = RequireCopyGrants().Validate(token, PeerId(context), shareId, path);
+        RequireTrusted(grant.RequesterId);
+        return grant;
+    }
     private async Task<IResult> ReadChunkAsync(HttpContext c, string shareId, string path, long offset, Guid fileId, string version)
     {
+        if (c.Request.Query.TryGetValue("copyToken", out var token)) ValidateCopyGrant(c, token.ToString(), shareId, path);
         var local = RequireStorage().Resolve(PeerId(c), shareId, path, SharePermissions.Download);
         await using var input = new FileStream(local, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
         if ($"{input.Length:x}-{File.GetLastWriteTimeUtc(local).Ticks:x}" != version) return Results.StatusCode(412);

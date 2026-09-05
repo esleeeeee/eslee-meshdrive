@@ -17,7 +17,25 @@ public sealed class FileTransferService(RemoteStorageClient remote, StorageServi
     private readonly CancellationTokenSource _lifetime = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _receiveGate = new(1, 1);
+    private readonly ConcurrentDictionary<string, string> _owners = new(StringComparer.Ordinal);
     public IReadOnlyList<TransferProgress> Progress => _progress.Values.ToArray();
+    public Func<string, bool> IsRequesterTrusted { private get; set; } = _ => false;
+    public async Task<CopyJob> ReceiveCopyAsync(string requester, CopyReceiveRequest request, CancellationToken token)
+    {
+        storage.Resolve(requester, request.ShareId, request.Path, SharePermissions.Upload);
+        var grant = await remote.GetAsync<CopyGrant>(request.SourceDeviceId, "/v1/secure/storage/copy-grant?token=" + Uri.EscapeDataString(request.Token), token).ConfigureAwait(false);
+        if (grant.RequesterId != requester) throw new UnauthorizedAccessException("다른 기기의 복사 요청입니다.");
+        var id = Start(new() { Action = "download", DeviceId = request.SourceDeviceId, ShareId = grant.ShareId, Path = grant.Path,
+            Destination = request.Path, TargetShareId = request.ShareId, CopyToken = request.Token, RequesterId = requester });
+        _owners[id] = requester;
+        return new(id);
+    }
+    public TransferProgress RemoteProgress(string requester, string id)
+    {
+        if (!_owners.TryGetValue(id, out var owner) || owner != requester) throw new UnauthorizedAccessException("다른 기기의 전송입니다.");
+        var value = _progress[id];
+        return value with { Result = value.Result is null ? null : Path.GetFileName(value.Result), Error = value.Error is null ? null : "직접 복사가 중단되었습니다. 권한과 연결을 확인하고 재시도하세요." };
+    }
     public string Start(StorageCommand command)
     {
         var id = Guid.NewGuid().ToString("N");
@@ -44,26 +62,35 @@ public sealed class FileTransferService(RemoteStorageClient remote, StorageServi
     private void Update(string id, long offset, long total) => _progress[id] = _progress[id] with { State = "복사 중", CompletedBytes = offset, TotalBytes = total };
     private async Task<string> DownloadAsync(StorageCommand command, string id, CancellationToken token)
     {
-        var resource = RemoteStorageClient.Resource("manifest", command.ShareId!, command.Path);
+        var suffix = command.CopyToken is null ? "" : "&copyToken=" + Uri.EscapeDataString(command.CopyToken);
+        var resource = RemoteStorageClient.Resource("manifest", command.ShareId!, command.Path) + suffix;
         var manifest = await remote.GetAsync<TransferManifest>(command.DeviceId!, resource, token).ConfigureAwait(false); QuickSendAdapter.Validate(manifest);
-        var destination = Path.GetFullPath(command.Destination!);
+        var destination = command.RequesterId is null ? Path.GetFullPath(command.Destination!) : storage.Resolve(command.RequesterId, command.TargetShareId!, command.Destination!, SharePermissions.Upload);
         Directory.CreateDirectory(destination);
         var desired = Path.Combine(destination, Path.GetFileName(command.Path));
-        var fileId = QuickSendAdapter.IdFor(command.DeviceId + "|" + resource + "|" + destination + "|" + manifest.Version);
+        var fileId = QuickSendAdapter.IdFor(command.DeviceId + "|" + RemoteStorageClient.Resource("manifest", command.ShareId!, command.Path) + "|" + destination + "|" + manifest.Version + command.RequesterId);
         var record = await RecordAsync(fileId, desired, manifest, token).ConfigureAwait(false);
         if (record.State == TransferState.Completed && File.Exists(record.FinalPath)) return record.FinalPath!;
         await using var receiver = new ReceiverSession(record, _store, new CheckpointPolicy(QuickSendAdapter.ChunkSize));
         await receiver.InitializeAsync(token).ConfigureAwait(false); Update(id, receiver.ReceivedOffset, manifest.Size);
         while (receiver.ReceivedOffset < manifest.Size)
         {
-            var path = RemoteStorageClient.Resource("chunk", command.ShareId!, command.Path) + $"&offset={receiver.ReceivedOffset}&fileId={fileId:N}&version={Uri.EscapeDataString(manifest.Version)}";
+            CheckCopyDestination(command, destination);
+            var path = RemoteStorageClient.Resource("chunk", command.ShareId!, command.Path) + $"&offset={receiver.ReceivedOffset}&fileId={fileId:N}&version={Uri.EscapeDataString(manifest.Version)}" + suffix;
             using var response = await remote.SendAsync(command.DeviceId!, HttpMethod.Get, path, null, token).ConfigureAwait(false); response.EnsureSuccessStatusCode();
             var payload = await response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
             if (payload.Length <= ProtocolConstants.ChunkMetadataSize || payload.Length > QuickSendAdapter.ChunkSize + ProtocolConstants.ChunkMetadataSize) throw new IOException("올바르지 않은 청크 크기입니다.");
             await receiver.ReceiveChunkAsync(payload, DateTimeOffset.UtcNow, token).ConfigureAwait(false); Update(id, receiver.ReceivedOffset, manifest.Size);
         }
+        CheckCopyDestination(command, destination);
         await QuickSendAdapter.VerifyStoredFileAsync(record.PartialPath!, manifest, token).ConfigureAwait(false);
         return await receiver.CompleteAsync(new(fileId, manifest.Size, manifest.LeafCount, manifest.MerkleRoot), DateTimeOffset.UtcNow, token).ConfigureAwait(false);
+    }
+    private void CheckCopyDestination(StorageCommand command, string expected)
+    {
+        if (command.RequesterId is not null && !IsRequesterTrusted(command.RequesterId)) throw new UnauthorizedAccessException("복사를 지시한 기기의 신뢰가 해제되었습니다.");
+        if (command.RequesterId is not null && !string.Equals(expected, storage.Resolve(command.RequesterId, command.TargetShareId!, command.Destination!, SharePermissions.Upload), StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("대상 공유 폴더가 변경되었습니다.");
     }
     private async Task<string> UploadAsync(StorageCommand command, string id, CancellationToken token)
     {
