@@ -90,6 +90,7 @@ public sealed class AgentHttpsHost : IAsyncDisposable
             app.MapGet("/v1/secure/storage/shares", (HttpContext c) => Results.Json(RequireStorage().ListShares(PeerId(c))));
             app.MapGet("/v1/secure/storage/entries", (HttpContext c, string shareId, string? path) =>
                 Results.Json(RequireStorage().ListEntries(PeerId(c), shareId, path ?? "")));
+            app.MapMethods("/v1/secure/storage/content", ["GET", "HEAD"], HandleContent);
             await app.StartAsync(cancellationToken).ConfigureAwait(false);
             _app = app;
             return true;
@@ -195,6 +196,17 @@ public sealed class AgentHttpsHost : IAsyncDisposable
         });
 
     private StorageService RequireStorage() => Storage ?? throw new InvalidOperationException("공유 저장소가 준비되지 않았습니다.");
+    private IResult HandleContent(HttpContext context, string shareId, string path, string? purpose)
+    {
+        var required = purpose == "download" ? SharePermissions.Download : SharePermissions.Stream;
+        var local = RequireStorage().Resolve(PeerId(context), shareId, path, required);
+        var stream = new FileStream(local, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var modified = File.GetLastWriteTimeUtc(local);
+        var etag = new Microsoft.Net.Http.Headers.EntityTagHeaderValue($"\"{stream.Length:x}-{modified.Ticks:x}\"");
+        var provider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+        return Results.File(stream, provider.TryGetContentType(local, out var mime) ? mime : "application/octet-stream",
+            lastModified: modified, entityTag: etag, enableRangeProcessing: true);
+    }
     private string PeerId(HttpContext context)
     {
         var fingerprint = DeviceFingerprints.FromCertificate(context.Connection.ClientCertificate!);
