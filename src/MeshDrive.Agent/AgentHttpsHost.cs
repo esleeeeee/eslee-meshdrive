@@ -20,6 +20,7 @@ public sealed class AgentHttpsHost : IAsyncDisposable
     private WebApplication? _app;
     public StorageService? Storage { get; init; }
     public PhotoCache? Thumbnails { get; init; }
+    public FileTransferService? Transfers { get; init; }
 
     public AgentHttpsHost(
         DeviceIdentity identity,
@@ -92,6 +93,19 @@ public sealed class AgentHttpsHost : IAsyncDisposable
             app.MapGet("/v1/secure/storage/entries", (HttpContext c, string shareId, string? path) =>
                 Results.Json(RequireStorage().ListEntries(PeerId(c), shareId, path ?? "")));
             app.MapMethods("/v1/secure/storage/content", ["GET", "HEAD"], HandleContent);
+            app.MapGet("/v1/secure/storage/manifest", async (HttpContext c, string shareId, string path) =>
+                Results.Json(await QuickSendAdapter.ManifestAsync(RequireStorage().Resolve(PeerId(c), shareId, path, SharePermissions.Download), c.RequestAborted).ConfigureAwait(false)));
+            app.MapGet("/v1/secure/storage/chunk", ReadChunkAsync);
+            app.MapPost("/v1/secure/storage/upload-start", async (HttpContext c, MeshDrive.Protocol.UploadRequest request) =>
+                Results.Json(await RequireTransfers().BeginUploadAsync(PeerId(c), request, c.RequestAborted).ConfigureAwait(false)));
+            app.MapPut("/v1/secure/storage/upload-chunk", async (HttpContext c, Guid id) =>
+            {
+                if (c.Request.ContentLength is not long length || length > QuickSendAdapter.ChunkSize + 60 || length <= 60) return Results.BadRequest();
+                var bytes = new byte[(int)length]; await c.Request.Body.ReadExactlyAsync(bytes, c.RequestAborted).ConfigureAwait(false);
+                await RequireTransfers().ReceiveUploadAsync(PeerId(c), id, bytes, c.RequestAborted).ConfigureAwait(false); return Results.Ok();
+            });
+            app.MapPost("/v1/secure/storage/upload-complete", async (HttpContext c, Guid id) =>
+            { await RequireTransfers().ReceiveUploadAsync(PeerId(c), id, null, c.RequestAborted).ConfigureAwait(false); return Results.Ok(); });
             app.MapMethods("/v1/secure/storage/thumbnail", ["GET", "HEAD"], (HttpContext c, string shareId, string path) =>
             {
                 var local = RequireStorage().Resolve(PeerId(c), shareId, path, SharePermissions.Stream);
@@ -204,6 +218,17 @@ public sealed class AgentHttpsHost : IAsyncDisposable
         });
 
     private StorageService RequireStorage() => Storage ?? throw new InvalidOperationException("공유 저장소가 준비되지 않았습니다.");
+    private FileTransferService RequireTransfers() => Transfers ?? throw new IOException("전송 엔진이 준비되지 않았습니다.");
+    private async Task<IResult> ReadChunkAsync(HttpContext c, string shareId, string path, long offset, Guid fileId, string version)
+    {
+        var local = RequireStorage().Resolve(PeerId(c), shareId, path, SharePermissions.Download);
+        await using var input = new FileStream(local, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
+        if ($"{input.Length:x}-{File.GetLastWriteTimeUtc(local).Ticks:x}" != version) return Results.StatusCode(412);
+        if (offset < 0 || offset >= input.Length || offset % QuickSendAdapter.ChunkSize != 0) return Results.BadRequest();
+        input.Position = offset; var buffer = new byte[(int)Math.Min(QuickSendAdapter.ChunkSize, input.Length - offset)];
+        await input.ReadExactlyAsync(buffer, c.RequestAborted).ConfigureAwait(false);
+        return Results.Bytes(QuickSendAdapter.Pack(fileId, offset, buffer), "application/octet-stream");
+    }
     private IResult HandleContent(HttpContext context, string shareId, string path, string? purpose)
     {
         var required = purpose == "download" ? SharePermissions.Download : SharePermissions.Stream;

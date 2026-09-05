@@ -92,6 +92,7 @@ public sealed class StorageHttpsTests
         public StorageService Storage { get; private set; } = null!;
         public RemoteStorageClient Remote { get; private set; } = null!;
         public AgentHttpsHost Host { get; private set; } = null!;
+        public FileTransferService Transfers { get; private set; } = null!;
         public static async Task<Node> CreateAsync(string name)
         {
             var node = new Node(); Directory.CreateDirectory(node.Root);
@@ -103,7 +104,8 @@ public sealed class StorageHttpsTests
             node.Pairing = new(node.Identity, node.Credential, node.Trust, new(node.Identity.DeviceId, DiscoveryNames.OfflineAfter), port);
             node.Storage = new(new(node.Data));
             node.Remote = new(node.Credential, node.Pairing);
-            node.Host = new(node.Identity, node.Credential, node.Pairing, port) { Storage = node.Storage, Thumbnails = new PhotoCache(Path.Combine(node.Data, "thumbnails")) };
+            node.Transfers = new(node.Remote, node.Storage, node.Data);
+            node.Host = new(node.Identity, node.Credential, node.Pairing, port) { Storage = node.Storage, Thumbnails = new PhotoCache(Path.Combine(node.Data, "thumbnails")), Transfers = node.Transfers };
             Assert.IsTrue(await node.Host.TryStartAsync(CancellationToken.None));
             return node;
         }
@@ -113,6 +115,6 @@ public sealed class StorageHttpsTests
             await Pairing.DecideLocalAsync(true, CancellationToken.None);
             await other.Pairing.DecideLocalAsync(true, CancellationToken.None);
         }
-        public async ValueTask DisposeAsync() { await Host.DisposeAsync(); Credential.Certificate.Dispose(); Directory.Delete(Data, true); }
+        public async ValueTask DisposeAsync() { await Host.DisposeAsync(); await Transfers.DisposeAsync(); Credential.Certificate.Dispose(); Directory.Delete(Data, true); }
     }
 }

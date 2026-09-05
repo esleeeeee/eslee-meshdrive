@@ -12,6 +12,7 @@
             <Button Content="상위 폴더" Click="Parent_Click"/><Button Content="새로고침" Click="Reload_Click"/>
           </WrapPanel>
           <TextBlock x:Name="Location" DockPanel.Dock="Top" Margin="0,0,0,12"/>
+          <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,12"><Button Content="이 기기로 가져오기" Click="Download_Click"/><Button Content="이 폴더로 파일 복사" Click="Upload_Click"/><Button Content="전송 상태" Click="Transfers_Click"/></WrapPanel>
           <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,12"><Button Content="선택 파일 열기" Click="OpenFile_Click"/><Button Content="음악 플레이어 설정" Click="MusicPlayer_Click"/><Button Content="영상 플레이어 설정" Click="VideoPlayer_Click"/><CheckBox x:Name="LargeIcons" Content="큰 아이콘" Margin="12,0" Checked="ViewChanged" Unchecked="ViewChanged"/></WrapPanel>
           <ListView x:Name="Entries" MouseDoubleClick="EntryDoubleClick">
             <ListView.ContextMenu><ContextMenu><MenuItem Header="연결 프로그램으로 열기" Click="OpenWith_Click"/></ContextMenu></ListView.ContextMenu>

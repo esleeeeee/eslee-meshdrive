@@ -68,6 +68,25 @@ public partial class StorageWindow : Window
         else await RunAsync(() => OpenFileAsync(false));
     }
     private async void OpenFile_Click(object sender, RoutedEventArgs e) => await RunAsync(() => OpenFileAsync(false));
+    private async void Download_Click(object sender, RoutedEventArgs e) => await RunAsync(async () =>
+    {
+        if (Entries.SelectedItem is not FileRow { IsDirectory: false } file || Devices.SelectedItem is not IpcTrustedPeer device || RemoteShares.SelectedItem is not RemoteShare share) return;
+        var dialog = new OpenFolderDialog { Title = "파일을 저장할 폴더" };
+        if (dialog.ShowDialog(this) != true) return;
+        await SendAsync(new() { Action = "download", DeviceId = device.DeviceId, ShareId = share.Id, Path = file.RelativePath, Destination = dialog.FolderName });
+    });
+    private async void Upload_Click(object sender, RoutedEventArgs e) => await RunAsync(async () =>
+    {
+        if (Devices.SelectedItem is not IpcTrustedPeer device || RemoteShares.SelectedItem is not RemoteShare share) return;
+        var dialog = new OpenFileDialog { Title = "상대 폴더에 복사할 파일", Multiselect = true };
+        if (dialog.ShowDialog(this) != true) return;
+        foreach (var file in dialog.FileNames) await SendAsync(new() { Action = "upload", DeviceId = device.DeviceId, ShareId = share.Id, Path = file, Destination = _path });
+    });
+    private async void Transfers_Click(object sender, RoutedEventArgs e)
+    {
+        try { var result = await SendAsync(new() { Action = "transfers" }); Feedback.Text = string.Join("\n", result.Transfers?.Select(t => $"{t.Name} · {t.State} · {t.CompletedBytes:N0}/{t.TotalBytes:N0} bytes · {t.Result ?? t.Error}") ?? []); }
+        catch (IOException error) { Feedback.Text = error.Message; }
+    }
     private async void OpenWith_Click(object sender, RoutedEventArgs e) => await RunAsync(() => OpenFileAsync(true));
     private void MusicPlayer_Click(object sender, RoutedEventArgs e) => ConfigurePlayer(true);
     private void VideoPlayer_Click(object sender, RoutedEventArgs e) => ConfigurePlayer(false);

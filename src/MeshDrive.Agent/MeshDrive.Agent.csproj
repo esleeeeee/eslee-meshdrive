@@ -6,6 +6,7 @@
     <AssemblyName>MeshDrive.Agent</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\..\third_party\QuickSend.Core\**\*.cs" Link="QuickSend\%(RecursiveDir)%(Filename)%(Extension)" />
     <ProjectReference Include="..\MeshDrive.Core\MeshDrive.Core.csproj" />
     <ProjectReference Include="..\MeshDrive.Protocol\MeshDrive.Protocol.csproj" />
   </ItemGroup>
