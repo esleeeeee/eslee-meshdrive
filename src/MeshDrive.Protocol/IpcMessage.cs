@@ -4,6 +4,8 @@ namespace MeshDrive.Protocol;
 
 public sealed class IpcMessage
 {
+    public StorageCommand? Storage { get; set; }
+    public StorageReply? StorageResult { get; set; }
     [JsonPropertyName("type")]
     public string? Type { get; set; }
 

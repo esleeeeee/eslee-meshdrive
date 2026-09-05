@@ -70,6 +70,19 @@ public sealed class PairingCoordinator
 
     public IReadOnlyList<TrustedPeer> ListTrusted() => _trust.Snapshot();
 
+    public (string[] Addresses, int Port, string Fingerprint) GetTrustedEndpoint(string deviceId)
+    {
+        if (!_trust.TryGetFingerprint(deviceId, out var fingerprint)) throw new UnauthorizedAccessException("신뢰되지 않은 기기입니다.");
+        var peer = _directory.Snapshot().FirstOrDefault(p => p.DeviceId == deviceId);
+        lock (_gate)
+        {
+            var known = _endpoints.GetValueOrDefault(deviceId);
+            var addresses = (peer?.ConnectionIpv4s() ?? []).Concat(known.Addresses ?? []).Distinct(StringComparer.Ordinal).ToArray();
+            if (addresses.Length == 0) throw new IOException("상대 기기를 찾지 못했습니다. 같은 네트워크인지, 공용 또는 게스트 네트워크인지 확인하세요.");
+            return (addresses, peer?.Port ?? known.Port, fingerprint);
+        }
+    }
+
     public async Task<IpcMessage?> HandleIpcAsync(IpcMessage message, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(message);

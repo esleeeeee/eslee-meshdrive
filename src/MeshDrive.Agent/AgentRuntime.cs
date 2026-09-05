@@ -28,6 +28,8 @@ public static class AgentRuntime
                 directory,
                 options.HttpsPort);
             var discovery = DiscoveryNames.DiscoveryOff;
+            var storage = new StorageService(new SharedFolderStore(options.DataDirectory));
+            var storageCommands = new StorageCoordinator(storage, new RemoteStorageClient(credential, coordinator));
             await using var server = new AgentIpcServer(
                 options.PipeName,
                 DateTimeOffset.Now,
@@ -35,12 +37,13 @@ public static class AgentRuntime
                 deviceName: identity.DeviceName,
                 discovery: DiscoveryNames.DiscoveryOff,
                 listPeers: coordinator.ListPeers,
-                handleCommand: coordinator.HandleIpcAsync,
+                handleCommand: async (message, token) => await storageCommands.HandleAsync(message, token).ConfigureAwait(false)
+                    ?? await coordinator.HandleIpcAsync(message, token).ConfigureAwait(false),
                 discoveryProvider: () => discovery);
             var ipc = server.RunAsync(cancellationToken);
             if (options.EnableHttps)
             {
-                https = new AgentHttpsHost(identity, credential, coordinator, options.HttpsPort);
+                https = new AgentHttpsHost(identity, credential, coordinator, options.HttpsPort) { Storage = storage };
                 try
                 {
                     await https.TryStartAsync(cancellationToken).ConfigureAwait(false);

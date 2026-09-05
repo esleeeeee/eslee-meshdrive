@@ -22,6 +22,12 @@ public sealed class AgentIpcClient : IAsyncDisposable
 
     public AgentStatus LastStatus { get; private set; }
 
+    public async Task<StorageReply> StorageAsync(StorageCommand command, CancellationToken cancellationToken = default)
+    {
+        var reply = await ExchangeMessageAsync(new IpcMessage { Type = "storage", Storage = command }, "storage-result", cancellationToken).ConfigureAwait(false);
+        return reply.StorageResult ?? throw new IOException("저장소 응답이 비어 있습니다.");
+    }
+
     public static async Task<AgentIpcClient> ConnectAsync(
         string pipeName,
         TimeSpan timeout,

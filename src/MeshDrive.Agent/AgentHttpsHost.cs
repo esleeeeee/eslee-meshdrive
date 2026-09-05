@@ -18,6 +18,7 @@ public sealed class AgentHttpsHost : IAsyncDisposable
     private readonly DeviceIdentity _identity;
     private readonly int _port;
     private WebApplication? _app;
+    public StorageService? Storage { get; init; }
 
     public AgentHttpsHost(
         DeviceIdentity identity,
@@ -73,9 +74,22 @@ public sealed class AgentHttpsHost : IAsyncDisposable
 
             var app = builder.Build();
             app.Use(ValidateClientCertificateAsync);
+            app.Use(async (context, next) =>
+            {
+                try { await next(context).ConfigureAwait(false); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+                {
+                    if (context.Response.HasStarted) throw;
+                    context.Response.StatusCode = e is UnauthorizedAccessException ? 403 : e is FileNotFoundException or DirectoryNotFoundException ? 404 : 400;
+                    await context.Response.WriteAsync("파일에 접근할 수 없습니다. 공유 권한과 파일 상태를 확인하세요.", context.RequestAborted).ConfigureAwait(false);
+                }
+            });
             app.MapPost("/v1/pairing/offer", HandleOfferAsync);
             app.MapPost("/v1/pairing/decision", HandleDecisionAsync);
             app.MapGet("/v1/secure/ping", HandlePing);
+            app.MapGet("/v1/secure/storage/shares", (HttpContext c) => Results.Json(RequireStorage().ListShares(PeerId(c))));
+            app.MapGet("/v1/secure/storage/entries", (HttpContext c, string shareId, string? path) =>
+                Results.Json(RequireStorage().ListEntries(PeerId(c), shareId, path ?? "")));
             await app.StartAsync(cancellationToken).ConfigureAwait(false);
             _app = app;
             return true;
@@ -179,4 +193,12 @@ public sealed class AgentHttpsHost : IAsyncDisposable
             DeviceId = _identity.DeviceId,
             DeviceName = _identity.DeviceName,
         });
+
+    private StorageService RequireStorage() => Storage ?? throw new InvalidOperationException("공유 저장소가 준비되지 않았습니다.");
+    private string PeerId(HttpContext context)
+    {
+        var fingerprint = DeviceFingerprints.FromCertificate(context.Connection.ClientCertificate!);
+        return _coordinator.ListTrusted().FirstOrDefault(p => DeviceFingerprints.FixedEquals(p.Fingerprint, fingerprint))?.DeviceId
+            ?? throw new UnauthorizedAccessException("신뢰되지 않은 기기입니다.");
+    }
 }

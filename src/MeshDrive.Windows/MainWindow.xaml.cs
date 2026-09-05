@@ -47,6 +47,8 @@ public partial class MainWindow : Window
 
     private void CloseWindow_Click(object sender, RoutedEventArgs e) => Close();
 
+    private void OpenStorage_Click(object sender, RoutedEventArgs e) => new StorageWindow { Owner = this }.Show();
+
     private async void ExitAll_Click(object sender, RoutedEventArgs e)
     {
         if (Interlocked.Exchange(ref _busy, 1) == 1)

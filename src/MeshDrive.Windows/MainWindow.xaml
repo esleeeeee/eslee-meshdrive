@@ -20,7 +20,7 @@
             <TextBlock Text="eslee" FontSize="14" Foreground="{StaticResource AccentBrush}" FontWeight="SemiBold" />
             <TextBlock Text="MeshDrive" FontSize="28" FontWeight="SemiBold" Margin="0,2,0,0" />
             <TextBlock Style="{StaticResource MutedText}" Margin="0,6,0,0"
-                       Text="Phase 2 — 발견한 기기를 SAS로 페어링한 뒤에만 HTTPS를 신뢰합니다." />
+                       Text="내 기기를 연결하고 공유 폴더의 파일을 원본 그대로 사용하세요." />
         </StackPanel>
 
         <Border Grid.Row="1" Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrush}"
@@ -156,6 +156,7 @@
                    Text="창을 닫아도 Agent는 계속 실행됩니다. 다시 실행하면 같은 Agent에 재연결합니다." />
 
         <DockPanel Grid.Row="6" Margin="0,18,0,0">
+            <Button Content="파일과 공유 폴더" Click="OpenStorage_Click" DockPanel.Dock="Left" />
             <Button x:Name="RefreshButton" Content="상태 새로고침" Click="Refresh_Click"
                     DockPanel.Dock="Left" HorizontalAlignment="Left" />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
