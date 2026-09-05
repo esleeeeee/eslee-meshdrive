@@ -15,6 +15,7 @@ public static class AgentRuntime
 
         MdnsDiscoveryHost? mdns = null;
         AgentHttpsHost? https = null;
+        LocalStreamBridge? bridge = null;
         try
         {
             var identity = DeviceIdentityStore.LoadOrCreate(options.DataDirectory);
@@ -29,7 +30,10 @@ public static class AgentRuntime
                 options.HttpsPort);
             var discovery = DiscoveryNames.DiscoveryOff;
             var storage = new StorageService(new SharedFolderStore(options.DataDirectory));
-            var storageCommands = new StorageCoordinator(storage, new RemoteStorageClient(credential, coordinator));
+            var remoteStorage = new RemoteStorageClient(credential, coordinator);
+            bridge = new LocalStreamBridge(remoteStorage);
+            await bridge.StartAsync(cancellationToken).ConfigureAwait(false);
+            var storageCommands = new StorageCoordinator(storage, remoteStorage) { Bridge = bridge };
             await using var server = new AgentIpcServer(
                 options.PipeName,
                 DateTimeOffset.Now,
@@ -67,6 +71,7 @@ public static class AgentRuntime
         }
         finally
         {
+            if (bridge is not null) await bridge.DisposeAsync().ConfigureAwait(false);
             if (https is not null)
             {
                 await https.DisposeAsync().ConfigureAwait(false);

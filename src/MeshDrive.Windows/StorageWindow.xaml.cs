@@ -48,6 +48,32 @@ public partial class StorageWindow : Window
     private async void EntryDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (Entries.SelectedItem is RemoteEntry { IsDirectory: true } entry) { _path = entry.RelativePath; await RunAsync(LoadEntriesAsync); }
+        else await RunAsync(() => OpenFileAsync(false));
+    }
+    private async void OpenFile_Click(object sender, RoutedEventArgs e) => await RunAsync(() => OpenFileAsync(false));
+    private async void OpenWith_Click(object sender, RoutedEventArgs e) => await RunAsync(() => OpenFileAsync(true));
+    private void MusicPlayer_Click(object sender, RoutedEventArgs e) => ConfigurePlayer(true);
+    private void VideoPlayer_Click(object sender, RoutedEventArgs e) => ConfigurePlayer(false);
+    private string? ConfigurePlayer(bool music)
+    {
+        var dialog = new OpenFileDialog { Filter = "플레이어 실행 파일 (*.exe)|*.exe", Title = music ? "음악 플레이어 선택" : "영상 플레이어 선택" };
+        if (dialog.ShowDialog(this) != true) return null;
+        var preferences = PlayerPreferences.Load(AppPaths.DefaultDataDirectory);
+        if (music) preferences.MusicPlayer = dialog.FileName; else preferences.VideoPlayer = dialog.FileName;
+        preferences.Save(AppPaths.DefaultDataDirectory); return dialog.FileName;
+    }
+    private async Task OpenFileAsync(bool choosePlayer)
+    {
+        if (Entries.SelectedItem is not RemoteEntry { IsDirectory: false } entry || Devices.SelectedItem is not IpcTrustedPeer device || RemoteShares.SelectedItem is not RemoteShare share) return;
+        var music = PlayerPreferences.IsMusic(entry.Name);
+        var preferences = PlayerPreferences.Load(AppPaths.DefaultDataDirectory);
+        var player = music ? preferences.MusicPlayer : preferences.VideoPlayer;
+        if (choosePlayer || string.IsNullOrEmpty(player) || !File.Exists(player)) player = ConfigurePlayer(music);
+        if (player is null) return;
+        var stream = await SendAsync(new() { Action = "open-stream", DeviceId = device.DeviceId, ShareId = share.Id, Path = entry.RelativePath });
+        var start = new System.Diagnostics.ProcessStartInfo(player) { UseShellExecute = false };
+        start.ArgumentList.Add(stream.Value!);
+        System.Diagnostics.Process.Start(start)?.Dispose();
     }
     private async void Parent_Click(object sender, RoutedEventArgs e) { var index = _path.LastIndexOf('/'); _path = index < 0 ? "" : _path[..index]; await RunAsync(LoadEntriesAsync); }
     private async void Reload_Click(object sender, RoutedEventArgs e) => await RunAsync(LoadEntriesAsync);

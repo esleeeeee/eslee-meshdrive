@@ -9,6 +9,37 @@ namespace MeshDrive.Tests;
 public sealed class StorageHttpsTests
 {
     [TestMethod]
+    public async Task LoopbackBridgeRelaysRangeAndExpiresTokens()
+    {
+        await using var a = await Node.CreateAsync("A"); await using var b = await Node.CreateAsync("B");
+        await a.PairAsync(b);
+        var bytes = Enumerable.Range(0, 4096).Select(i => (byte)(i % 251)).ToArray();
+        await File.WriteAllBytesAsync(Path.Combine(b.Root, "movie.mp4"), bytes);
+        var share = b.Storage.Shares.Save(null, "Media", b.Root, SharePermissions.ReadOnly);
+        var clock = new TestClock();
+        await using var bridge = new LocalStreamBridge(a.Remote, clock);
+        await bridge.StartAsync(CancellationToken.None);
+        var url = await bridge.CreateAsync(b.Identity.DeviceId, share.Id, "movie.mp4", CancellationToken.None);
+        Assert.AreEqual("127.0.0.1", new Uri(url).Host);
+        using var http = new HttpClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, url); request.Headers.Range = new(12, 89);
+        using var partial = await http.SendAsync(request);
+        Assert.AreEqual(HttpStatusCode.PartialContent, partial.StatusCode);
+        CollectionAssert.AreEqual(bytes[12..90], await partial.Content.ReadAsByteArrayAsync());
+        using var bad = await http.GetAsync(new Uri(bridge.BaseAddress!, "/stream/bad/movie.mp4"));
+        Assert.AreEqual(HttpStatusCode.Gone, bad.StatusCode);
+        clock.Now += LocalStreamBridge.IdleLifetime;
+        using var expired = await http.GetAsync(url); Assert.AreEqual(HttpStatusCode.Gone, expired.StatusCode);
+        var renewed = await bridge.CreateAsync(b.Identity.DeviceId, share.Id, "movie.mp4", CancellationToken.None);
+        b.Trust.Unpair(a.Identity.DeviceId);
+        using var unpaired = await http.GetAsync(renewed); Assert.AreEqual(HttpStatusCode.Forbidden, unpaired.StatusCode);
+    }
+    private sealed class TestClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+    [TestMethod]
     public async Task AuthenticatedBrowseAndOriginalRangeBytesEnforcePermissions()
     {
         await using var a = await Node.CreateAsync("A");
