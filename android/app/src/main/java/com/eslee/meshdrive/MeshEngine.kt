@@ -31,6 +31,7 @@ class MeshEngine(val context: Context): AutoCloseable {
     private val streams = ConcurrentHashMap<String, Triple<String,String,Long>>()
     private val storageApi = StorageApi(context, ::document)
     private val directCopies = DirectCopies(this)
+    val sync = AndroidSync(context,::trusted,{paused})
     @Volatile var pairing: PairSession? = null
     @Volatile var status = "준비 중"
     @Volatile var paused = false
@@ -70,9 +71,10 @@ class MeshEngine(val context: Context): AutoCloseable {
     @Synchronized private fun document(share:String,path:String,permission:Int):DocumentFile {if(paused)throw SecurityException();val s=(0 until shares.length()).map{shares.getJSONObject(it)}.first{it.getString("id")==share};if(s.getInt("permissions") and permission != permission)throw SecurityException();var doc=DocumentFile.fromTreeUri(context,Uri.parse(s.getString("uri")))?:throw IOException();for(part in PairingProtocol.safeParts(path)){if(part.startsWith('.'))throw SecurityException();doc=doc.findFile(part)?:throw FileNotFoundException()};return doc}
     private fun serve(r:HttpRequest):HttpReply {
         val cert=r.peer?:throw SecurityException();val fp=DeviceSecurity.fingerprint(cert)
-        val expectedMethod=when(r.path){"/v1/pairing/offer","/v1/pairing/decision","/v1/secure/storage/upload-start","/v1/secure/storage/upload-complete","/v1/secure/storage/copy-authorize","/v1/secure/storage/copy-receive"->"POST";"/v1/secure/storage/upload-chunk"->"PUT";else->"GET"}
+        val expectedMethod=when(r.path){"/v1/pairing/offer","/v1/pairing/decision","/v1/secure/storage/upload-start","/v1/secure/storage/upload-complete","/v1/secure/storage/copy-authorize","/v1/secure/storage/copy-receive","/v1/secure/sync/upload-start","/v1/secure/sync/upload-complete","/v1/secure/sync/delete"->"POST";"/v1/secure/storage/upload-chunk","/v1/secure/sync/upload-chunk"->"PUT";else->"GET"}
         if(r.method!=expectedMethod&&!(r.method=="HEAD"&&expectedMethod=="GET"))return HttpReply.text("",405)
         if(r.path.startsWith("/v1/secure/")){synchronized(this){if((trust.keys().asSequence().map{trust.getString(it)}).none{it==fp})throw SecurityException()}}
+        if(r.path.startsWith("/v1/secure/sync/"))return sync.handle(r,synchronized(this){trust.keys().asSequence().first{trust.getString(it)==fp}})
         if(r.path=="/v1/pairing/offer"&&r.method=="POST") {val remote=JSONObject(r.body.toString(Charsets.UTF_8));validate(remote,cert);val now=System.currentTimeMillis();val expires=PairingProtocol.expires(Instant.parse(remote.getString("expiresAt")).toEpochMilli(),now);val peer=Peer(remote.getString("deviceId"),remote.getString("deviceName"),r.address,remote.getInt("listenPort"));synchronized(this){require(!trusted(peer.id));require(pairing?.let{!it.rejected&&now<it.expires&&!(it.localAccepted&&it.remoteAccepted)}!=true);val local=offer(remote.getString("sessionId"),expires);pairing=session(local,remote,peer);peers[peer.id]=peer;return HttpReply.text(local.toString())}}
         if(r.path=="/v1/pairing/decision"&&r.method=="POST"){val d=JSONObject(r.body.toString(Charsets.UTF_8));synchronized(this){val p=pairing?:throw SecurityException();require(d.getString("sessionId")==p.offer.getString("sessionId")&&d.getString("deviceId")==p.peer.id&&fp==p.remote.getString("fingerprint"));require(System.currentTimeMillis()<p.expires&&!p.rejected);p.remoteAccepted=d.getBoolean("accepted");p.rejected=!p.remoteAccepted;complete(p)};return HttpReply.text("{}")}
         if(r.path=="/v1/secure/ping")return HttpReply.text(JSONObject().put("deviceId",security.id).put("deviceName",name).toString())

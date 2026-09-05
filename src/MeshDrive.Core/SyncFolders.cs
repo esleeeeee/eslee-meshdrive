@@ -130,7 +130,11 @@ public sealed class SyncFolders
             if (sourcePath is not null && (newHash is null || FileHash(sourcePath) != newHash)) throw new IOException("동기화 파일 무결성 검사 실패");
             if (current == newHash) return;
             if (current is not null) Preserve(rootId, path, local, current);
-            if (sourcePath is null) { if (File.Exists(local)) File.Delete(local); }
+            if (sourcePath is null)
+            {
+                if ((File.Exists(local) ? FileHash(local) : null) != expectedHash) throw new IOException("버전 보관 중 원본이 변경되었습니다. 삭제하지 않았습니다.");
+                if (File.Exists(local)) File.Delete(local);
+            }
             else
             {
                 var temp = Path.Combine(Path.GetDirectoryName(local)!, ".meshdrive-sync-" + Guid.NewGuid().ToString("N") + ".tmp");
@@ -138,6 +142,7 @@ public sealed class SyncFolders
                 {
                     File.Copy(sourcePath, temp, false);
                     if (FileHash(temp) != newHash) throw new IOException("동기화 임시 파일 무결성 검사 실패");
+                    if ((File.Exists(local) ? FileHash(local) : null) != expectedHash) throw new IOException("파일 복사 중 원본이 변경되었습니다. 교체하지 않았습니다.");
                     File.Move(temp, local, true);
                 }
                 finally { if (File.Exists(temp)) File.Delete(temp); }
