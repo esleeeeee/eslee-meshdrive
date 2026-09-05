@@ -16,6 +16,8 @@ public static class AgentRuntime
         MdnsDiscoveryHost? mdns = null;
         AgentHttpsHost? https = null;
         LocalStreamBridge? bridge = null;
+        FileTransferService? transfers = null;
+        SyncRunner? syncRunner = null;
         try
         {
             var settings = AgentSettings.Load(options.DataDirectory);
@@ -35,8 +37,10 @@ public static class AgentRuntime
             bridge = new LocalStreamBridge(remoteStorage);
             await bridge.StartAsync(cancellationToken).ConfigureAwait(false);
             using var photos = new RemotePhotoService(remoteStorage, options.DataDirectory);
-            await using var transfers = new FileTransferService(remoteStorage, storage, options.DataDirectory);
-            var storageCommands = new StorageCoordinator(storage, remoteStorage) { Bridge = bridge, Photos = photos, Transfers = transfers, Settings = settings, DataDirectory = options.DataDirectory };
+            transfers = new FileTransferService(remoteStorage, storage, options.DataDirectory);
+            var sync = new SyncFolders(options.DataDirectory);
+            syncRunner = new(sync, new(remoteStorage, options.DataDirectory), options.DataDirectory) { IsPaused = () => storage.Paused, IsTrusted = id => trust.Snapshot().Any(p => p.DeviceId == id) };
+            var storageCommands = new StorageCoordinator(storage, remoteStorage) { Bridge = bridge, Photos = photos, Transfers = transfers, Settings = settings, DataDirectory = options.DataDirectory, Sync = new(sync, syncRunner, remoteStorage) };
             await using var server = new AgentIpcServer(
                 options.PipeName,
                 DateTimeOffset.Now,
@@ -56,7 +60,7 @@ public static class AgentRuntime
             if (options.PipeName == IpcNames.DefaultPipeName) tray.Start();
             if (options.EnableHttps)
             {
-                https = new AgentHttpsHost(identity, credential, coordinator, options.HttpsPort) { Storage = storage, Thumbnails = new PhotoCache(Path.Combine(options.DataDirectory, "thumbnails"), 256 * 1024 * 1024), Transfers = transfers };
+                https = new AgentHttpsHost(identity, credential, coordinator, options.HttpsPort) { Storage = storage, Thumbnails = new PhotoCache(Path.Combine(options.DataDirectory, "thumbnails"), 256 * 1024 * 1024), Transfers = transfers, Sync = sync, SyncInbox = new(sync, options.DataDirectory) };
                 try
                 {
                     await https.TryStartAsync(cancellationToken).ConfigureAwait(false);
@@ -75,6 +79,7 @@ public static class AgentRuntime
                 }
             }
 
+            syncRunner.Start();
             await ipc.ConfigureAwait(false);
             if (server.IsShutdownRequested) exitSignal?.Set();
             return 0;
@@ -88,6 +93,8 @@ public static class AgentRuntime
             }
 
             mdns?.Dispose();
+            if (syncRunner is not null) await syncRunner.DisposeAsync().ConfigureAwait(false);
+            if (transfers is not null) await transfers.DisposeAsync().ConfigureAwait(false);
             if (ownsMutex && mutex is not null)
             {
                 try

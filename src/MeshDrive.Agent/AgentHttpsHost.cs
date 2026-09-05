@@ -22,6 +22,8 @@ public sealed class AgentHttpsHost : IAsyncDisposable
     public PhotoCache? Thumbnails { get; init; }
     public FileTransferService? Transfers { get; init; }
     private CopyGrants? _copyGrants;
+    public SyncFolders? Sync { get; init; }
+    public SyncInbox? SyncInbox { get; init; }
 
     public AgentHttpsHost(
         DeviceIdentity identity,
@@ -90,6 +92,7 @@ public sealed class AgentHttpsHost : IAsyncDisposable
                 }
             });
             app.MapPost("/v1/pairing/offer", HandleOfferAsync);
+            if (Sync is not null && SyncInbox is not null) SyncHttpApi.Map(app, Sync, SyncInbox, PeerId, () => Storage?.Paused == true);
             app.MapPost("/v1/pairing/decision", HandleDecisionAsync);
             app.MapGet("/v1/secure/ping", HandlePing);
             app.MapGet("/v1/secure/storage/shares", (HttpContext c) => Results.Json(RequireStorage().ListShares(PeerId(c))));

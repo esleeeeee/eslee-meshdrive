@@ -11,11 +11,13 @@ public sealed class StorageCoordinator(StorageService storage, RemoteStorageClie
     public FileTransferService? Transfers { get; init; }
     public AgentSettings? Settings { get; init; }
     public string? DataDirectory { get; init; }
+    public SyncCoordinator? Sync { get; init; }
     public async Task<IpcMessage?> HandleAsync(IpcMessage message, CancellationToken cancellationToken)
     {
         if (message.Type != "storage" || message.Storage is not { } command) return null;
         try
         {
+            if (command.Action.StartsWith("sync-", StringComparison.Ordinal)) return new() { Type = "storage-result", StorageResult = await (Sync ?? throw new IOException("동기화가 준비되지 않았습니다.")).HandleAsync(command, cancellationToken).ConfigureAwait(false) };
             var result = new StorageReply();
             switch (command.Action)
             {

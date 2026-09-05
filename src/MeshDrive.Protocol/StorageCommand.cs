@@ -16,6 +16,10 @@ public sealed class StorageCommand
     public string? TargetShareId { get; set; }
     public string? CopyToken { get; set; }
     public string? RequesterId { get; set; }
+    public List<string>? AllowedDevices { get; set; }
+    public SyncJob? SyncJob { get; set; }
+    public int VersionCount { get; set; } = 20;
+    public int RetentionDays { get; set; } = 30;
 }
 
 public sealed class StorageReply

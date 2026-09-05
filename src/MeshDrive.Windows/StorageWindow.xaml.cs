@@ -33,6 +33,7 @@ public partial class StorageWindow : Window
         Closed += async (_, _) => { await _lifetime.CancelAsync(); if (_client is not null) await _client.DisposeAsync(); _lifetime.Dispose(); };
     }
     private Task<StorageReply> SendAsync(StorageCommand command) => (_client ?? throw new IOException("Agent 연결을 기다리세요.")).StorageAsync(command, _lifetime.Token);
+    private void Sync_Click(object sender, RoutedEventArgs e) => new SyncWindow { Owner = this }.Show();
     private async Task RunAsync(Func<Task> action)
     {
         try { await action(); Feedback.Text = "완료"; }

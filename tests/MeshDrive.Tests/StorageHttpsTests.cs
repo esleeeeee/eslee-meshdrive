@@ -93,6 +93,7 @@ public sealed class StorageHttpsTests
         public RemoteStorageClient Remote { get; private set; } = null!;
         public AgentHttpsHost Host { get; private set; } = null!;
         public FileTransferService Transfers { get; private set; } = null!;
+        public SyncFolders Sync { get; private set; } = null!;
         public static async Task<Node> CreateAsync(string name)
         {
             var node = new Node(); Directory.CreateDirectory(node.Root);
@@ -105,7 +106,8 @@ public sealed class StorageHttpsTests
             node.Storage = new(new(node.Data));
             node.Remote = new(node.Credential, node.Pairing);
             node.Transfers = new(node.Remote, node.Storage, node.Data);
-            node.Host = new(node.Identity, node.Credential, node.Pairing, port) { Storage = node.Storage, Thumbnails = new PhotoCache(Path.Combine(node.Data, "thumbnails")), Transfers = node.Transfers };
+            node.Sync = new(node.Data);
+            node.Host = new(node.Identity, node.Credential, node.Pairing, port) { Storage = node.Storage, Thumbnails = new PhotoCache(Path.Combine(node.Data, "thumbnails")), Transfers = node.Transfers, Sync = node.Sync, SyncInbox = new(node.Sync, node.Data) };
             Assert.IsTrue(await node.Host.TryStartAsync(CancellationToken.None));
             return node;
         }
