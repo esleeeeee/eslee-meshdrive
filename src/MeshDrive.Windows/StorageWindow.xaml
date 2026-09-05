@@ -12,10 +12,11 @@
             <Button Content="상위 폴더" Click="Parent_Click"/><Button Content="새로고침" Click="Reload_Click"/>
           </WrapPanel>
           <TextBlock x:Name="Location" DockPanel.Dock="Top" Margin="0,0,0,12"/>
-          <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,12"><Button Content="선택 파일 열기" Click="OpenFile_Click"/><Button Content="음악 플레이어 설정" Click="MusicPlayer_Click"/><Button Content="영상 플레이어 설정" Click="VideoPlayer_Click"/></WrapPanel>
+          <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,12"><Button Content="선택 파일 열기" Click="OpenFile_Click"/><Button Content="음악 플레이어 설정" Click="MusicPlayer_Click"/><Button Content="영상 플레이어 설정" Click="VideoPlayer_Click"/><CheckBox x:Name="LargeIcons" Content="큰 아이콘" Margin="12,0" Checked="ViewChanged" Unchecked="ViewChanged"/></WrapPanel>
           <ListView x:Name="Entries" MouseDoubleClick="EntryDoubleClick">
             <ListView.ContextMenu><ContextMenu><MenuItem Header="연결 프로그램으로 열기" Click="OpenWith_Click"/></ContextMenu></ListView.ContextMenu>
             <ListView.View><GridView>
+              <GridViewColumn Header="미리보기" Width="90"><GridViewColumn.CellTemplate><DataTemplate><Image Source="{Binding Thumbnail}" Width="64" Height="48"/></DataTemplate></GridViewColumn.CellTemplate></GridViewColumn>
               <GridViewColumn Header="이름" Width="360" DisplayMemberBinding="{Binding Name}"/>
               <GridViewColumn Header="폴더" Width="70" DisplayMemberBinding="{Binding IsDirectory}"/>
               <GridViewColumn Header="크기 (바이트)" Width="130" DisplayMemberBinding="{Binding Length}"/>

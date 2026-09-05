@@ -103,7 +103,7 @@ public sealed class StorageHttpsTests
             node.Pairing = new(node.Identity, node.Credential, node.Trust, new(node.Identity.DeviceId, DiscoveryNames.OfflineAfter), port);
             node.Storage = new(new(node.Data));
             node.Remote = new(node.Credential, node.Pairing);
-            node.Host = new(node.Identity, node.Credential, node.Pairing, port) { Storage = node.Storage };
+            node.Host = new(node.Identity, node.Credential, node.Pairing, port) { Storage = node.Storage, Thumbnails = new PhotoCache(Path.Combine(node.Data, "thumbnails")) };
             Assert.IsTrue(await node.Host.TryStartAsync(CancellationToken.None));
             return node;
         }

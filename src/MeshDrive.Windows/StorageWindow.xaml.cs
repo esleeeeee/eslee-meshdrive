@@ -14,9 +14,12 @@ public partial class StorageWindow : Window
     private AgentIpcClient? _client;
     private string _path = "";
     private readonly CancellationTokenSource _lifetime = new();
+    private GridView? _detailsView;
+    private int _navigation;
     public StorageWindow()
     {
         InitializeComponent();
+        _detailsView = Entries.View as GridView;
         Loaded += async (_, _) => await RunAsync(async () =>
         {
             _client = await AgentIpcClient.ConnectAsync(IpcNames.DefaultPipeName, TimeSpan.FromSeconds(5), _lifetime.Token);
@@ -42,12 +45,26 @@ public partial class StorageWindow : Window
     private async Task LoadEntriesAsync()
     {
         if (Devices.SelectedItem is not IpcTrustedPeer device || RemoteShares.SelectedItem is not RemoteShare share) return;
-        Entries.ItemsSource = (await SendAsync(new() { Action = "entries", DeviceId = device.DeviceId, ShareId = share.Id, Path = _path })).Entries;
+        var navigation = ++_navigation;
+        var rows = (await SendAsync(new() { Action = "entries", DeviceId = device.DeviceId, ShareId = share.Id, Path = _path })).Entries?.Select(e => new FileRow(e)).ToArray() ?? [];
+        if (navigation != _navigation) return;
+        Entries.ItemsSource = rows;
         Location.Text = $"{device.Name} / {share.Name} / {_path}";
+        foreach (var row in rows.Where(r => MeshDrive.Agent.PhotoCache.IsImage(r.Name)))
+        {
+            if (navigation != _navigation) break;
+            try
+            {
+                var thumbnail = await SendAsync(new() { Action = "thumbnail", DeviceId = device.DeviceId, ShareId = share.Id, Path = row.RelativePath });
+                var image = new System.Windows.Media.Imaging.BitmapImage(); image.BeginInit(); image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+                image.UriSource = new Uri(thumbnail.Value!); image.EndInit(); image.Freeze(); row.Thumbnail = image;
+            }
+            catch (IOException) { }
+        }
     }
     private async void EntryDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (Entries.SelectedItem is RemoteEntry { IsDirectory: true } entry) { _path = entry.RelativePath; await RunAsync(LoadEntriesAsync); }
+        if (Entries.SelectedItem is FileRow { IsDirectory: true } entry) { _path = entry.RelativePath; await RunAsync(LoadEntriesAsync); }
         else await RunAsync(() => OpenFileAsync(false));
     }
     private async void OpenFile_Click(object sender, RoutedEventArgs e) => await RunAsync(() => OpenFileAsync(false));
@@ -64,7 +81,12 @@ public partial class StorageWindow : Window
     }
     private async Task OpenFileAsync(bool choosePlayer)
     {
-        if (Entries.SelectedItem is not RemoteEntry { IsDirectory: false } entry || Devices.SelectedItem is not IpcTrustedPeer device || RemoteShares.SelectedItem is not RemoteShare share) return;
+        if (Entries.SelectedItem is not FileRow { IsDirectory: false } entry || Devices.SelectedItem is not IpcTrustedPeer device || RemoteShares.SelectedItem is not RemoteShare share) return;
+        if (MeshDrive.Agent.PhotoCache.IsImage(entry.Name))
+        {
+            var photo = await SendAsync(new() { Action = "open-photo", DeviceId = device.DeviceId, ShareId = share.Id, Path = entry.RelativePath });
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(photo.Value!) { UseShellExecute = true })?.Dispose(); return;
+        }
         var music = PlayerPreferences.IsMusic(entry.Name);
         var preferences = PlayerPreferences.Load(AppPaths.DefaultDataDirectory);
         var player = music ? preferences.MusicPlayer : preferences.VideoPlayer;
@@ -74,6 +96,17 @@ public partial class StorageWindow : Window
         var start = new System.Diagnostics.ProcessStartInfo(player) { UseShellExecute = false };
         start.ArgumentList.Add(stream.Value!);
         System.Diagnostics.Process.Start(start)?.Dispose();
+    }
+    private void ViewChanged(object sender, RoutedEventArgs e)
+    {
+        if (Entries is null) return;
+        if (LargeIcons.IsChecked == true)
+        {
+            Entries.View = null;
+            Entries.ItemTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><StackPanel Width='170' Margin='8'><Image Source='{Binding Thumbnail}' Width='150' Height='120'/><TextBlock Text='{Binding Name}' TextWrapping='Wrap'/></StackPanel></DataTemplate>");
+            Entries.ItemsPanel = (ItemsPanelTemplate)System.Windows.Markup.XamlReader.Parse("<ItemsPanelTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><WrapPanel/></ItemsPanelTemplate>");
+        }
+        else { Entries.ItemTemplate = null; Entries.ClearValue(ItemsControl.ItemsPanelProperty); Entries.View = _detailsView; }
     }
     private async void Parent_Click(object sender, RoutedEventArgs e) { var index = _path.LastIndexOf('/'); _path = index < 0 ? "" : _path[..index]; await RunAsync(LoadEntriesAsync); }
     private async void Reload_Click(object sender, RoutedEventArgs e) => await RunAsync(LoadEntriesAsync);
@@ -98,4 +131,16 @@ public partial class StorageWindow : Window
         FolderPath.Text = share.LocalPath; Alias.Text = share.Name;
         Preset.SelectedIndex = share.Permissions == SharePermissions.All ? 1 : share.Permissions == (SharePermissions.Browse | SharePermissions.Stream) ? 2 : 0;
     }
+}
+
+public sealed class FileRow(RemoteEntry entry) : System.ComponentModel.INotifyPropertyChanged
+{
+    public string Name => entry.Name;
+    public string RelativePath => entry.RelativePath;
+    public bool IsDirectory => entry.IsDirectory;
+    public long Length => entry.Length;
+    public DateTimeOffset ModifiedAt => entry.ModifiedAt;
+    private System.Windows.Media.ImageSource? _thumbnail;
+    public System.Windows.Media.ImageSource? Thumbnail { get => _thumbnail; set { _thumbnail = value; PropertyChanged?.Invoke(this, new(nameof(Thumbnail))); } }
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
 }

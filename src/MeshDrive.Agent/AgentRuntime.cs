@@ -33,7 +33,8 @@ public static class AgentRuntime
             var remoteStorage = new RemoteStorageClient(credential, coordinator);
             bridge = new LocalStreamBridge(remoteStorage);
             await bridge.StartAsync(cancellationToken).ConfigureAwait(false);
-            var storageCommands = new StorageCoordinator(storage, remoteStorage) { Bridge = bridge };
+            using var photos = new RemotePhotoService(remoteStorage, options.DataDirectory);
+            var storageCommands = new StorageCoordinator(storage, remoteStorage) { Bridge = bridge, Photos = photos };
             await using var server = new AgentIpcServer(
                 options.PipeName,
                 DateTimeOffset.Now,
@@ -47,7 +48,7 @@ public static class AgentRuntime
             var ipc = server.RunAsync(cancellationToken);
             if (options.EnableHttps)
             {
-                https = new AgentHttpsHost(identity, credential, coordinator, options.HttpsPort) { Storage = storage };
+                https = new AgentHttpsHost(identity, credential, coordinator, options.HttpsPort) { Storage = storage, Thumbnails = new PhotoCache(Path.Combine(options.DataDirectory, "thumbnails"), 256 * 1024 * 1024) };
                 try
                 {
                     await https.TryStartAsync(cancellationToken).ConfigureAwait(false);

@@ -19,6 +19,7 @@ public sealed class AgentHttpsHost : IAsyncDisposable
     private readonly int _port;
     private WebApplication? _app;
     public StorageService? Storage { get; init; }
+    public PhotoCache? Thumbnails { get; init; }
 
     public AgentHttpsHost(
         DeviceIdentity identity,
@@ -91,6 +92,13 @@ public sealed class AgentHttpsHost : IAsyncDisposable
             app.MapGet("/v1/secure/storage/entries", (HttpContext c, string shareId, string? path) =>
                 Results.Json(RequireStorage().ListEntries(PeerId(c), shareId, path ?? "")));
             app.MapMethods("/v1/secure/storage/content", ["GET", "HEAD"], HandleContent);
+            app.MapMethods("/v1/secure/storage/thumbnail", ["GET", "HEAD"], (HttpContext c, string shareId, string path) =>
+            {
+                var local = RequireStorage().Resolve(PeerId(c), shareId, path, SharePermissions.Stream);
+                var file = (Thumbnails ?? throw new IOException("썸네일이 준비되지 않았습니다.")).Thumbnail(local);
+                return Results.File(file, "image/jpeg", lastModified: File.GetLastWriteTimeUtc(local),
+                    entityTag: new Microsoft.Net.Http.Headers.EntityTagHeaderValue($"\"{Path.GetFileNameWithoutExtension(file)}\""));
+            });
             await app.StartAsync(cancellationToken).ConfigureAwait(false);
             _app = app;
             return true;
