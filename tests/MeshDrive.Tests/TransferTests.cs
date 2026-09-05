@@ -8,6 +8,29 @@ namespace MeshDrive.Tests;
 public sealed class TransferTests
 {
     [TestMethod]
+    public async Task CorruptedPartialIsNotCompletedAndResumeRetransmitsDamagedBytes()
+    {
+        await using var node = await StorageHttpsTests.Node.CreateAsync("A");
+        var bytes = new byte[127]; new Random(19).NextBytes(bytes);
+        var source = Path.Combine(node.Data, "original.bin"); await File.WriteAllBytesAsync(source, bytes);
+        var manifest = await QuickSendAdapter.ManifestAsync(source, CancellationToken.None);
+        var share = node.Storage.Shares.Save(null, "Files", node.Root, SharePermissions.All);
+        var request = new UploadRequest(share.Id, "", "copy.bin", manifest);
+        var ticket = await node.Transfers.BeginUploadAsync("peer", request, CancellationToken.None);
+        var id = Guid.Parse(ticket.Id);
+        await node.Transfers.ReceiveUploadAsync("peer", id, QuickSendAdapter.Pack(id, 0, bytes), CancellationToken.None);
+        var partial = Path.Combine(node.Data, "transfer-parts", ticket.Id + ".part");
+        var corrupted = (byte[])bytes.Clone(); corrupted[0] ^= 1; await File.WriteAllBytesAsync(partial, corrupted);
+        await Assert.ThrowsExactlyAsync<IOException>(() => node.Transfers.ReceiveUploadAsync("peer", id, null, CancellationToken.None));
+        Assert.IsFalse(File.Exists(Path.Combine(node.Root, "copy.bin")));
+        await using var restarted = new FileTransferService(node.Remote, node.Storage, node.Data);
+        var resumed = await restarted.BeginUploadAsync("peer", request, CancellationToken.None);
+        Assert.AreEqual(0L, resumed.Offset);
+        await restarted.ReceiveUploadAsync("peer", id, QuickSendAdapter.Pack(id, 0, bytes), CancellationToken.None);
+        await restarted.ReceiveUploadAsync("peer", id, null, CancellationToken.None);
+        CollectionAssert.AreEqual(bytes, await File.ReadAllBytesAsync(Path.Combine(node.Root, "copy.bin")));
+    }
+    [TestMethod]
     public async Task QuickSendDownloadUploadAndCollisionPreserveBytes()
     {
         await using var a = await StorageHttpsTests.Node.CreateAsync("A"); await using var b = await StorageHttpsTests.Node.CreateAsync("B"); await a.PairAsync(b);

@@ -9,6 +9,46 @@ import java.util.Base64
 
 object AndroidTransfers {
     private const val CHUNK=8*1024*1024
+    fun upload(engine:MeshEngine,peer:MeshEngine.Peer,share:String,path:String,source:File){
+        val merkle=com.eslee.quicksend.engine.MerkleAccumulator()
+        source.inputStream().use { input ->
+            val buffer=ByteArray(CHUNK)
+            while(true){val count=StorageApi.readChunk(input,buffer);if(count==0)break;merkle.addChunk(buffer.copyOf(count))}
+        }
+        val size=source.length()
+        val modified=source.lastModified()*10000+621355968000000000L
+        val manifest=JSONObject().put("size",size).put("modifiedUtcTicks",modified)
+            .put("version","${size.toString(16)}-${modified.toString(16)}")
+            .put("chunkSize",CHUNK).put("leafCount",merkle.leafCount)
+            .put("merkleRoot",Base64.getEncoder().encodeToString(merkle.root()))
+        val request=JSONObject().put("shareId",share).put("path",path).put("name",source.name).put("manifest",manifest)
+        fun send(route:String,method:String,body:ByteArray):String {
+            val connection=engine.connection(peer,"/v1/secure/storage/$route")
+            try {
+                connection.requestMethod=method;connection.doOutput=true
+                connection.setRequestProperty("Content-Type",if(method=="PUT")"application/octet-stream" else "application/json")
+                connection.setFixedLengthStreamingMode(body.size)
+                connection.outputStream.use{it.write(body)}
+                require(connection.responseCode in 200..299){"전송 실패 (${connection.responseCode})"}
+                return connection.inputStream.use{it.readBytes().toString(Charsets.UTF_8)}
+            } finally { connection.disconnect() }
+        }
+        val ticket=JSONObject(send("upload-start","POST",request.toString().toByteArray()))
+        val id=ticket.getString("id").replace("-","")
+        require(id.matches(Regex("[0-9a-fA-F]{32}")))
+        var offset=ticket.getLong("offset");require(offset in 0..size&&(offset==size||offset%CHUNK==0L))
+        RandomAccessFile(source,"r").use { input ->
+            input.seek(offset)
+            while(offset<size){
+                val bytes=ByteArray(minOf(CHUNK.toLong(),size-offset).toInt());input.readFully(bytes)
+                val payload=ByteBuffer.allocate(bytes.size+60)
+                    .put(id.chunked(2).map{it.toInt(16).toByte()}.toByteArray())
+                    .putLong(offset).putInt(bytes.size).put(MessageDigest.getInstance("SHA-256").digest(bytes)).put(bytes).array()
+                send("upload-chunk?id=$id","PUT",payload);offset+=bytes.size
+            }
+        }
+        send("upload-complete?id=$id","POST",ByteArray(0))
+    }
     fun root(leaves:List<ByteArray>):ByteArray = com.eslee.quicksend.engine.MerkleAccumulator.restore(leaves.fold(ByteArray(0)){all,leaf->all+leaf}).root()
     fun download(engine:MeshEngine,peer:MeshEngine.Peer,share:String,path:String,destination:File):File{
         destination.mkdirs();val c=engine.connection(peer,engine.resource("manifest",share,path));val manifest=try{require(c.responseCode==200);c.inputStream.use{JSONObject(it.readBytes().toString(Charsets.UTF_8))}}finally{c.disconnect()}

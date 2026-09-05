@@ -35,7 +35,7 @@ class DeviceSecurity(context: Context) {
             override fun checkServerTrusted(chain: Array<out X509Certificate>, auth: String) = check(chain)
             private fun check(chain: Array<out X509Certificate>) {
                 require(chain.isNotEmpty()); val cert = chain[0]; cert.checkValidity()
-                require(cert.publicKey.algorithm == "EC" && cert.subjectX500Principal.name.contains("eslee MeshDrive Device"))
+                require(cert.publicKey.algorithm == "EC" && cert.subjectX500Principal.name.contains("eslee MeshDrive Device") && cert.issuerX500Principal == cert.subjectX500Principal)
                 if (expected != null) require(MessageDigest.isEqual(fingerprint(cert).toByteArray(), expected.toByteArray())) { "인증서가 일치하지 않습니다" }
             }
         }

@@ -62,6 +62,7 @@ public sealed class FileTransferService(RemoteStorageClient remote, StorageServi
             if (payload.Length <= ProtocolConstants.ChunkMetadataSize || payload.Length > QuickSendAdapter.ChunkSize + ProtocolConstants.ChunkMetadataSize) throw new IOException("올바르지 않은 청크 크기입니다.");
             await receiver.ReceiveChunkAsync(payload, DateTimeOffset.UtcNow, token).ConfigureAwait(false); Update(id, receiver.ReceivedOffset, manifest.Size);
         }
+        await QuickSendAdapter.VerifyStoredFileAsync(record.PartialPath!, manifest, token).ConfigureAwait(false);
         return await receiver.CompleteAsync(new(fileId, manifest.Size, manifest.LeafCount, manifest.MerkleRoot), DateTimeOffset.UtcNow, token).ConfigureAwait(false);
     }
     private async Task<string> UploadAsync(StorageCommand command, string id, CancellationToken token)
@@ -88,7 +89,12 @@ public sealed class FileTransferService(RemoteStorageClient remote, StorageServi
     private async Task<TransferFileRecord> RecordAsync(Guid id, string desired, TransferManifest manifest, CancellationToken token)
     {
         var previous = await _store.FindFileAsync(id, token).ConfigureAwait(false);
-        if (previous is not null && (previous.State != TransferState.Completed || File.Exists(previous.FinalPath))) return previous;
+        if (previous is not null && (previous.State != TransferState.Completed || File.Exists(previous.FinalPath)))
+        {
+            var verified = await QuickSendAdapter.VerifyResumeAsync(previous, token).ConfigureAwait(false);
+            await _store.UpsertFileAsync(verified, token).ConfigureAwait(false);
+            return verified;
+        }
         var staging = Path.Combine(dataDirectory, "transfer-parts"); Directory.CreateDirectory(staging);
         var record = new TransferFileRecord(id, id, Path.GetFileName(desired), "", Path.Combine(staging, id.ToString("N") + ".part"), desired,
             manifest.Size, manifest.ModifiedUtcTicks, manifest.Version, manifest.ChunkSize, 0, 0, [], TransferState.Transferring);
@@ -136,6 +142,7 @@ public sealed class FileTransferService(RemoteStorageClient remote, StorageServi
             else
             {
                 var manifest = envelope.Request.Manifest;
+                await QuickSendAdapter.VerifyStoredFileAsync(record.PartialPath!, manifest, token).ConfigureAwait(false);
                 await receiver.CompleteAsync(new(id, manifest.Size, manifest.LeafCount, manifest.MerkleRoot), DateTimeOffset.UtcNow, token).ConfigureAwait(false);
             }
         }
