@@ -16,6 +16,8 @@ class AndroidSync(private val context:android.content.Context,private val truste
     private val roots=JSONArray(preferences.getString("roots","[]")!!)
     private val inbox=File(context.filesDir,"sync-inbox").apply{mkdirs()}
     private val archives=File(context.filesDir,"sync-versions").apply{mkdirs()}
+    private val replacements=File(context.filesDir,"sync-replacements").apply{mkdirs()}
+    internal var replacementBoundary:(String)->Unit = {}
     private val chunkSize=8*1024*1024
     @Synchronized fun snapshot()=JSONArray(roots.toString())
     @Synchronized fun add(uri:Uri,name:String,devices:List<String>){
@@ -74,23 +76,61 @@ class AndroidSync(private val context:android.content.Context,private val truste
         val directory=parent(id,path,device,source!=null)?:return
         if(source==null){root(id,device);check(current(id,path,device)==expected);check(previous?.delete()!=false);trim(id,path);return}
         val temp=directory.createFile("application/octet-stream",".meshdrive-sync-${UUID.randomUUID()}.part")?:throw IOException()
+        val temporaryName=temp.name ?: throw IOException("임시 파일 이름 없음")
         try {
             context.contentResolver.openOutputStream(temp.uri,"w")!!.use{out->source.inputStream().use{it.copyTo(out)}}
             check(hash(temp)==newHash){"저장된 동기화 파일 무결성 오류"}
             root(id,device);check(current(id,path,device)==expected){"동기화 중 원본이 변경되었습니다"}
+            val journal=File(replacements,"$id-${UUID.randomUUID()}.json")
+            write(journal,JSONObject().put("rootId",id).put("path",path).put("oldHash",expected?:JSONObject.NULL)
+                .put("newHash",newHash).put("saved",saved?.name?:JSONObject.NULL).put("temp",temp.name)
+                .put("oldUri",previous?.uri?.toString()?:JSONObject.NULL).put("tempUri",temp.uri.toString()))
+            replacementBoundary("before-delete")
             check(previous?.delete()!=false)
+            replacementBoundary("after-delete")
             val name=parts(path).last()
-            if(directory.findFile(name)!=null||!temp.renameTo(name)){
-                if(saved!=null&&directory.findFile(name)==null){
-                    val restored=directory.createFile("application/octet-stream",name)?:throw IOException("이전 버전에서 수동 복원이 필요합니다")
-                    context.contentResolver.openOutputStream(restored.uri,"w")!!.use{out->saved.inputStream().use{it.copyTo(out)}}
-                    check(hash(restored)==expected){"이전 버전에서 수동 복원이 필요합니다"}
-                }
-                throw IOException("파일 교체 실패. 이전 버전이 보관되어 있습니다")
-            }
-        }catch(e:Exception){temp.delete();throw e}
+            check(directory.findFile(name)==null&&temp.renameTo(name)){"파일 교체 실패"}
+            replacementBoundary("after-rename")
+            check(hash(temp)==newHash){"교체 파일 검증 실패"}
+            check(journal.delete())
+        }catch(e:Exception){
+            // Recovery also handles providers which throw after mutating the tree.
+            recoverReplacements(id)
+            directory.findFile(temporaryName)?.delete()
+            throw e
+        }
         trim(id,path)
     }
+    @Synchronized private fun recoverReplacements(rootId:String){
+        for(journal in replacements.listFiles().orEmpty().filter{it.extension=="json"&&it.name.startsWith("$rootId-")}){
+            val transaction=JSONObject(journal.readText())
+            val id=transaction.getString("rootId");val path=transaction.getString("path")
+            val directory=parent(id,path,null,true)?:throw IOException("교체 복구 폴더 없음")
+            val name=parts(path).last();val oldHash=nullable(transaction,"oldHash");val newHash=transaction.getString("newHash")
+            val existing=directory.findFile(name)
+            if(existing!=null){
+                val digest=hash(existing)
+                check(digest==oldHash||digest==newHash){"복구 중 원본 변경 감지. 버전에서 수동 복원이 필요합니다"}
+            }else{
+                val savedName=nullable(transaction,"saved")
+                if(savedName!=null){
+                    require(savedName.matches(Regex("[0-9a-f]{32}\\.bin")))
+                    val saved=File(archives,savedName);check(hash(saved)==oldHash)
+                    val restored=directory.createFile("application/octet-stream",name)?:throw IOException("복구 파일 생성 실패")
+                    try{
+                        context.contentResolver.openOutputStream(restored.uri,"w")!!.use{out->saved.inputStream().use{it.copyTo(out)}}
+                        check(hash(restored)==oldHash)
+                    }catch(e:Exception){restored.delete();throw e}
+                }else{
+                    val staged=directory.findFile(transaction.getString("temp"))?:throw IOException("복구 임시 파일 없음")
+                    check(hash(staged)==newHash);check(staged.renameTo(name))
+                }
+            }
+            directory.findFile(transaction.getString("temp"))?.let{check(it.delete())}
+            check(journal.delete())
+        }
+    }
+
     private fun trim(id:String,path:String){
         versions(id).filter{it.getString("path")==path}.forEachIndexed{index,v->
             if(index>0&&(index>=retentionCount()||Instant.parse(v.getString("createdAt")).isBefore(Instant.now().minusSeconds(retentionDays()*86400L)))){
@@ -100,6 +140,7 @@ class AndroidSync(private val context:android.content.Context,private val truste
         }
     }
     @Synchronized fun restore(id:String,version:String){
+        recoverReplacements(id)
         val metadata=versions(id).first{it.getString("id")==version};require(version.matches(Regex("[0-9a-f]{32}")))
         val path=metadata.getString("path");apply(id,path,current(id,path,null),File(archives,"$version.bin"),metadata.getString("hash"),null)
     }
@@ -110,6 +151,13 @@ class AndroidSync(private val context:android.content.Context,private val truste
         root(saved.getJSONObject("request").getString("rootId"),device);return saved
     }
     @Synchronized fun handle(r:HttpRequest,device:String):HttpReply {
+        // A broken/revoked root must fail closed without blocking unrelated roots.
+        val recoveryRoot = r.query["rootId"] ?: when {
+            r.path.endsWith("/upload-start") || r.path.endsWith("/delete") -> JSONObject(r.body.toString(Charsets.UTF_8)).getString("rootId")
+            r.path.endsWith("/upload-chunk") || r.path.endsWith("/upload-complete") -> envelope(r.query["id"]!!,device).getJSONObject("request").getString("rootId")
+            else -> null
+        }
+        recoveryRoot?.let{root(it,device);recoverReplacements(it)}
         if(r.path.endsWith("/roots")){
             val visible=JSONArray();for(i in 0 until roots.length()){
                 val item=roots.getJSONObject(i);try{root(item.getString("id"),device);visible.put(JSONObject().put("id",item.getString("id")).put("name",item.getString("name")))}catch(_:SecurityException){}

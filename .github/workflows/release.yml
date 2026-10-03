@@ -1,0 +1,89 @@
+name: Prerelease
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+  DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Validate candidate and install compiler
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $source = ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+          if ($version -notmatch '^\d+\.\d+\.\d+-rc\.\d+$' -or $version -ne $source) { throw 'Candidate tag must match source.' }
+          if (-not (Test-Path ".github/release-notes/v$version.md")) { throw 'Release notes missing.' }
+          choco install innosetup --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw 'Inno installation failed.' }
+      - name: Build test and package
+        shell: pwsh
+        run: ./scripts/Build-Windows.ps1 -InnoCompiler 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+      - name: Record source and package hashes
+        shell: pwsh
+        run: |
+          $installer = Get-Item artifacts/installer/MeshDriveSetup.exe
+          if ($installer.Length -eq 0) { throw 'Empty installer.' }
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          @{version=$env:GITHUB_REF_NAME; source_sha=$env:GITHUB_SHA; checks=@('Windows solution Release build and tests','Self-contained Windows/agent publish','Inno installer'); android='Debug tests/build/lint gated by android job; signed APK requires separate local verification'; assets=@(@{file=$installer.Name; bytes=$installer.Length; sha256=$hash})} | ConvertTo-Json -Depth 5 | Set-Content artifacts/installer/release-manifest.json
+          $manifestHash = (Get-FileHash artifacts/installer/release-manifest.json -Algorithm SHA256).Hash.ToLowerInvariant()
+          @("$hash  MeshDriveSetup.exe", "$manifestHash  release-manifest.json") | Set-Content artifacts/installer/SHA256SUMS.txt -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: artifacts/installer/
+          if-no-files-found: error
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - run: bash gradlew testDebugUnitTest assembleDebug lintDebug --no-daemon
+        working-directory: android
+      - name: Record Android validation
+        if: always()
+        run: |
+          mkdir -p artifacts/validation
+          git rev-parse HEAD > artifacts/validation/source-sha.txt
+          find android/app/build/outputs/apk -name '*.apk' -exec sha256sum {} \; > artifacts/validation/apk-sha256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-validation
+          path: |
+            artifacts/validation
+            android/app/build/reports
+  publish:
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: release
+      - name: Create new prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --prerelease --title "MeshDrive $GITHUB_REF_NAME" --notes-file ".github/release-notes/$GITHUB_REF_NAME.md" release/MeshDriveSetup.exe release/release-manifest.json release/SHA256SUMS.txt

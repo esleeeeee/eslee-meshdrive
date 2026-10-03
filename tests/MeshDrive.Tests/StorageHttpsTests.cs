@@ -98,7 +98,14 @@ public sealed class StorageHttpsTests
         {
             var node = new Node(); Directory.CreateDirectory(node.Root);
             node.Identity = DeviceIdentityStore.LoadOrCreate(node.Data, name);
-            node.Credential = DeviceCredentialStore.LoadOrCreate(node.Data, node.Identity.DeviceId);
+            using var key = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+            var request = new System.Security.Cryptography.X509Certificates.CertificateRequest(
+                $"CN={DeviceFingerprints.CertificateSubjectCommonName}, serialNumber={node.Identity.DeviceId}", key, System.Security.Cryptography.HashAlgorithmName.SHA256);
+            using var generated = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(1));
+            // Schannel import without PersistKeySet: temporary key is deleted on certificate disposal.
+            node.Credential = new(node.Identity.DeviceId, System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12(
+                generated.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pfx), null,
+                System.Security.Cryptography.X509Certificates.X509KeyStorageFlags.DefaultKeySet));
             node.Trust = new(node.Data);
             var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start();
             var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
@@ -107,10 +114,22 @@ public sealed class StorageHttpsTests
             node.Remote = new(node.Credential, node.Pairing);
             node.Transfers = new(node.Remote, node.Storage, node.Data);
             node.Sync = new(node.Data);
-            node.Host = new(node.Identity, node.Credential, node.Pairing, port) { Storage = node.Storage, Thumbnails = new PhotoCache(Path.Combine(node.Data, "thumbnails")), Transfers = node.Transfers, Sync = node.Sync, SyncInbox = new(node.Sync, node.Data) };
+            node.Host = new(node.Identity, node.Credential, node.Pairing, port) { ListenAddress = IPAddress.Loopback, Storage = node.Storage, Thumbnails = new PhotoCache(Path.Combine(node.Data, "thumbnails")), Transfers = node.Transfers, Sync = node.Sync, SyncInbox = new(node.Sync, node.Data) };
             Assert.IsTrue(await node.Host.TryStartAsync(CancellationToken.None));
             return node;
         }
+        public async Task RestartSyncHostAsync()
+        {
+            var port = Host.Port;
+            await Host.DisposeAsync();
+            Trust = new(Data);
+            Pairing = new(Identity, Credential, Trust, new(Identity.DeviceId, DiscoveryNames.OfflineAfter), port);
+            Sync = new(Data);
+            Host = new(Identity, Credential, Pairing, port) { ListenAddress = IPAddress.Loopback, Storage = Storage,
+                Transfers = Transfers, Sync = Sync, SyncInbox = new(Sync, Data) };
+            Assert.IsTrue(await Host.TryStartAsync(CancellationToken.None));
+        }
+
         public async Task PairAsync(Node other)
         {
             await Pairing.StartOutgoingAsync(other.Identity.DeviceId, "127.0.0.1", other.Host.Port, CancellationToken.None);

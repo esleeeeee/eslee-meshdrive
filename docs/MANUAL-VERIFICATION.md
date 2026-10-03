@@ -38,3 +38,8 @@
 - [ ] 평소 파일 규모로 수 시간 사용하며 저장 공간·응답성·재연결 확인
 
 서버/외부망 Relay 검증은 필요 없습니다. Android 동기화 규칙은 Windows Agent가 구동합니다. 이 개발 환경에서는 WPF 실제 화면 자동화 접근이 거부되어 화면 QA를 완료하지 못했습니다.
+
+
+### 2026-10-03 isolated Windows HTTPS follow-through
+
+`dotnet test tests/MeshDrive.Tests --filter FullyQualifiedName~SyncNetworkIoTests` passed with two loopback-only HTTPS endpoints, generated QA certificates, isolated trust/sync directories and a fully written 128 MiB source. The sender stopped after one acknowledged 8 MiB upload chunk, the receiver host and persisted sync/trust stores were reopened, and the upload resumed. Final hash, HTTPS range download, completed-inbox cleanup, preservation of the replaced version and restoration of the original bytes all passed. The generated folders and certificates were disposed after the check. No physical LAN/SAF provider/sleep/three-physical-device claim follows from this test.

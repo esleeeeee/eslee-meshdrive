@@ -2,7 +2,7 @@ plugins { id("com.android.application") }
 android {
     namespace = "com.eslee.meshdrive"
     compileSdk = 36
-    defaultConfig { applicationId = "com.eslee.meshdrive"; minSdk = 26; targetSdk = 36; versionCode = 1; versionName = "0.2.0" }
+    defaultConfig { applicationId = "com.eslee.meshdrive"; minSdk = 26; targetSdk = 36; versionCode = 2; versionName = "0.2.0-rc.2" }
     val signingFile = System.getenv("MESHDRIVE_KEYSTORE")
     if (!signingFile.isNullOrBlank()) {
         signingConfigs.create("localRelease") {

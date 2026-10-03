@@ -1,7 +1,7 @@
 #ifndef PublishDir
   #define PublishDir "..\artifacts\publish"
 #endif
-#define AppVersion "0.2.0"
+#define AppVersion "0.2.0-rc.2"
 [Setup]
 AppId={{9601ED02-95A7-49C8-BE5F-6E1390981464}
 AppName=eslee MeshDrive
