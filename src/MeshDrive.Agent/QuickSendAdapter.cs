@@ -92,6 +92,13 @@ public sealed class QuickSendCheckpointStore : ITransferStore
         var record = await FindFileAsync(fileId, cancellationToken).ConfigureAwait(false) ?? throw new IOException("전송 기록이 없습니다.");
         await UpsertFileAsync(record with { ReceivedOffset = committedOffset, CommittedOffset = committedOffset, MerkleLeaves = merkleLeaves }, cancellationToken).ConfigureAwait(false);
     }
+    public async ValueTask RestoreCheckpointAsync(Guid fileId, long expectedCommittedOffset, long committedOffset, byte[] merkleLeaves, DateTimeOffset at, CancellationToken cancellationToken)
+    {
+        var record = await FindFileAsync(fileId, cancellationToken).ConfigureAwait(false) ?? throw new IOException("전송 기록이 없습니다.");
+        if (record.State == TransferState.Completed || record.CommittedOffset != expectedCommittedOffset || committedOffset < 0 || committedOffset > expectedCommittedOffset)
+            throw new IOException("복구 체크포인트가 변경되었습니다.");
+        await UpsertFileAsync(record with { ReceivedOffset = committedOffset, CommittedOffset = committedOffset, MerkleLeaves = merkleLeaves }, cancellationToken).ConfigureAwait(false);
+    }
     public async ValueTask MarkFileCompletedAsync(Guid fileId, string finalPath, byte[] merkleRoot, DateTimeOffset at, CancellationToken cancellationToken)
     {
         var record = await FindFileAsync(fileId, cancellationToken).ConfigureAwait(false) ?? throw new IOException("전송 기록이 없습니다.");

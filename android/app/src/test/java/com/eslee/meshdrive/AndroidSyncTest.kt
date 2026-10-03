@@ -19,10 +19,11 @@ class AndroidSyncTest {
     private class Fixture {
         val context=RuntimeEnvironment.getApplication()
         val directory=File(context.filesDir,"selected-${java.util.UUID.randomUUID()}").apply{mkdirs()}
+        val trees=mutableMapOf(Uri.fromFile(directory).toString() to directory)
         var trusted=true
-        fun create()=AndroidSync(context,{trusted},{false}){DocumentFile.fromFile(directory)}
+        fun create()=AndroidSync(context,{trusted},{false}){uri->trees[uri.toString()]?.let{DocumentFile.fromFile(it)}}
         val sync=create().also{it.add(Uri.fromFile(directory),"Selected",listOf("peer"))}
-        val root=sync.snapshot().getJSONObject(0).getString("id")
+        val root=sync.snapshot().let{it.getJSONObject(it.length()-1).getString("id")}
     }
     private fun request(path:String,body:JSONObject?=null,query:Map<String,String> = emptyMap(),bytes:ByteArray?=null)=HttpRequest(
         if(path=="upload-chunk")"PUT" else if(body==null)"GET" else "POST","/v1/secure/sync/$path",query,emptyMap(),bytes?:body?.toString()?.toByteArray()?:ByteArray(0),null,"127.0.0.1")
@@ -46,6 +47,58 @@ class AndroidSyncTest {
         val restarted=f.create();assertEquals(2,restarted.versions(f.root).size)
         restarted.restore(f.root,version.getString("id"));assertArrayEquals(old,File(f.directory,"note.txt").readBytes())
     }
+    @Test fun replacementCrashBoundariesRecoverBeforeInventory(){
+        for(boundary in listOf("before-delete","after-delete","after-rename")){
+            val f=Fixture();val old="original".toByteArray();val newer="replacement".toByteArray()
+            upload(f.sync,f.root,old,null)
+            f.sync.replacementBoundary={if(it==boundary)throw AssertionError("simulated process death")}
+            var crashed=false
+            try{upload(f.sync,f.root,newer,hash(old))}catch(_:AssertionError){crashed=true}
+            assertTrue("boundary was reached",crashed)
+            val restarted=f.create()
+            val reply=restarted.handle(request("inventory",query=mapOf("rootId" to f.root)),"peer")
+            val inventory=org.json.JSONArray(reply.stream!!.bufferedReader().use{it.readText()})
+            assertEquals(1,inventory.length())
+            assertArrayEquals(if(boundary=="after-rename")newer else old,File(f.directory,"note.txt").readBytes())
+            assertTrue(File(f.context.filesDir,"sync-replacements").listFiles().orEmpty().isEmpty())
+        }
+    }
+    @Test fun removedRootRecoveryDoesNotBlockOtherRoots(){
+        val f=Fixture();val old="original".toByteArray();upload(f.sync,f.root,old,null)
+        f.sync.replacementBoundary={if(it=="after-delete")throw AssertionError("process death")}
+        var crashed=false
+        try{upload(f.sync,f.root,"new".toByteArray(),hash(old))}catch(_:AssertionError){crashed=true}
+        assertTrue(crashed)
+        f.sync.remove(f.root)
+        val other=File(f.context.filesDir,"other-root").apply{mkdirs()};File(other,"keep.txt").writeText("kept")
+        f.trees[Uri.fromFile(other).toString()]=other
+        val restarted=f.create();restarted.add(Uri.fromFile(other),"Other",listOf("peer"))
+        val id=restarted.snapshot().getJSONObject(0).getString("id")
+        val reply=restarted.handle(request("inventory",query=mapOf("rootId" to id)),"peer")
+        val inventory=org.json.JSONArray(reply.stream!!.bufferedReader().use{it.readText()})
+        assertEquals("keep.txt",inventory.getJSONObject(0).getString("path"))
+        assertEquals(1,File(f.context.filesDir,"sync-replacements").listFiles().orEmpty().size)
+        try{restarted.handle(request("inventory",query=mapOf("rootId" to f.root)),"peer");fail()}catch(_:SecurityException){}
+    }
+
+    @Test fun exceptionAfterSuccessfulRenameKeepsPublishedFile(){
+        val f=Fixture();val old="original".toByteArray();val newer="replacement".toByteArray();upload(f.sync,f.root,old,null)
+        f.sync.replacementBoundary={if(it=="after-rename")throw java.io.IOException("journal cleanup failure")}
+        try{upload(f.sync,f.root,newer,hash(old));fail()}catch(_:java.io.IOException){}
+        assertArrayEquals(newer,File(f.directory,"note.txt").readBytes())
+        assertEquals(1,f.sync.versions(f.root).size)
+        val restarted=f.create();restarted.handle(request("inventory",query=mapOf("rootId" to f.root)),"peer").stream!!.close()
+        assertArrayEquals(newer,File(f.directory,"note.txt").readBytes())
+    }
+
+    @Test fun thrownReplacementFailureRestoresCanonicalFile(){
+        val f=Fixture();val old="original".toByteArray();upload(f.sync,f.root,old,null)
+        f.sync.replacementBoundary={if(it=="after-delete")throw java.io.IOException("provider failure")}
+        try{upload(f.sync,f.root,"replacement".toByteArray(),hash(old));fail()}catch(_:java.io.IOException){}
+        assertArrayEquals(old,File(f.directory,"note.txt").readBytes())
+        assertEquals(1,f.sync.versions(f.root).size)
+    }
+
     @Test fun corruptionRevokedTrustAndUnapprovedRootsAreRejected(){
         val f=Fixture();val original="original".toByteArray();upload(f.sync,f.root,original,null)
         try{upload(f.sync,f.root,"changed".toByteArray(),"wrong");fail()}catch(_:IllegalStateException){}

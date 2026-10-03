@@ -27,5 +27,6 @@ Copy-Item "$taskBuild/app/build/outputs/apk/$taskVariant/app-$taskVariant.apk" "
 $taskReports = "$taskRoot/artifacts/android/reports/$taskVariant"
 New-Item -ItemType Directory -Force $taskReports | Out-Null
 Copy-Item "$taskBuild/app/build/reports/*" $taskReports -Recurse -Force
-Copy-Item "$taskBuild/app/build/test-results/testDebugUnitTest" "$taskReports/test-results" -Recurse -Force
+New-Item -ItemType Directory -Force "$taskReports/test-results" | Out-Null
+Copy-Item "$taskBuild/app/build/test-results/testDebugUnitTest/*" "$taskReports/test-results" -Recurse -Force
 Get-FileHash "$taskRoot/artifacts/android/MeshDrive-$taskVariant.apk" -Algorithm SHA256

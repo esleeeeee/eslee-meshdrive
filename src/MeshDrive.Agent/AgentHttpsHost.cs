@@ -43,6 +43,8 @@ public sealed class AgentHttpsHost : IAsyncDisposable
 
     public int Port => _port;
 
+    public IPAddress ListenAddress { get; init; } = IPAddress.Any;
+
     public bool IsRunning => _app is not null;
 
     public async Task<bool> TryStartAsync(CancellationToken cancellationToken)
@@ -64,7 +66,7 @@ public sealed class AgentHttpsHost : IAsyncDisposable
             builder.WebHost.UseSetting("urls", string.Empty);
             builder.WebHost.UseKestrel(options =>
             {
-                options.Listen(IPAddress.Any, _port, listen =>
+                options.Listen(ListenAddress, _port, listen =>
                 {
                     listen.UseHttps(https =>
                     {
